@@ -1,0 +1,6 @@
+name=BiteCheck Test: Suspicious
+id=BiteCheckTestSuspicious
+description=Harmless test mod for BiteCheck. Not in the test index, and its code mentions a process start (never executed), so the local scan marks it SUSPICIOUS. It only prints one line to the log.
+require=\ZombieBuddy
+javaJarFile=media/java/BiteCheckTestSuspicious.jar
+javaPkgName=io.github.bitecheckpz.testmods.suspicious

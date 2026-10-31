@@ -1,12 +1,18 @@
 package io.github.bitecheckpz.launcher;
 
 import io.github.bitecheckpz.core.Index;
+import io.github.bitecheckpz.core.Scanner;
 import io.github.bitecheckpz.core.Verifier;
 
+import java.io.IOException;
 import java.time.Instant;
 import java.util.ArrayList;
+import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
+import java.util.Set;
+import java.util.concurrent.ConcurrentHashMap;
 
 /**
  * Turns the installed Java mods and the registry index into decisions for ZombieBuddy.
@@ -15,12 +21,16 @@ import java.util.Optional;
  *   <caption>What happens per jar</caption>
  *   <tr><th>Status</th><th>ZombieBuddy decision</th></tr>
  *   <tr><td>VERIFIED</td><td>allow - loads without a question</td></tr>
- *   <tr><td>UNVERIFIED</td><td>unchanged - ZombieBuddy warns and asks the player in game; an approval
- *       BiteCheck wrote earlier is taken back</td></tr>
- *   <tr><td>FLAGGED</td><td>deny, unless the player allowed it anyway in BiteCheck (double
- *       confirmation)</td></tr>
+ *   <tr><td>UNVERIFIED, local scan clean or soft findings only</td><td>unchanged - ZombieBuddy warns
+ *       and asks the player in game; an approval BiteCheck wrote earlier is taken back</td></tr>
+ *   <tr><td>UNVERIFIED, local scan has hard findings ("suspicious")</td><td>deny, unless the player
+ *       allowed it anyway (double confirmation)</td></tr>
+ *   <tr><td>FLAGGED</td><td>deny, unless the player allowed it anyway (double confirmation)</td></tr>
  *   <tr><td>BLOCKED</td><td>deny - never loads</td></tr>
  * </table>
+ *
+ * <p>The local scan is a provisional check for mods nobody has reviewed yet. It catches obvious
+ * red flags (process start, native code, runtime code loading, obfuscation) but is no review.
  */
 public final class Planner {
 
@@ -28,9 +38,22 @@ public final class Planner {
         NONE, ALLOW, DENY, ASK_IN_GAME
     }
 
+    /**
+     * @param scan local scan of an unverified jar, or null (verified/flagged/blocked jars are not
+     *             scanned; also null if the jar could not be read, which counts as suspicious)
+     */
     public record Row(JavaMods.JavaMod mod, JavaMods.Jar jar, Verifier.Status status, String info,
-            Boolean currentDecision, Action action, boolean allowedAnyway) {
+            Boolean currentDecision, Action action, boolean allowedAnyway, Scanner.Report scan,
+            boolean suspicious) {
+
+        /** Flagged or suspicious: blocked by BiteCheck unless the player allows it anyway. */
+        public boolean needsPermission() {
+            return status == Verifier.Status.FLAGGED || suspicious;
+        }
     }
+
+    /** Scan results by jar hash; jars do not change under the same hash. */
+    private static final Map<String, Optional<Scanner.Report>> SCANS = new ConcurrentHashMap<>();
 
     private Planner() {
     }
@@ -50,20 +73,68 @@ public final class Planner {
                     status = Verifier.Status.UNVERIFIED;
                     info = "index is out of date, cannot confirm verification";
                 }
+                Scanner.Report scan = null;
+                boolean suspicious = false;
+                if (status == Verifier.Status.UNVERIFIED) {
+                    Optional<Scanner.Report> report = scan(jar);
+                    scan = report.orElse(null);
+                    suspicious = report.isEmpty() || report.get().hasHardFindings();
+                    info = info + "; " + describeScan(report);
+                }
                 Boolean current = approvals.decision(sha);
-                boolean allowedAnyway = state.allowedFlagged().containsKey(sha);
-                Action action = switch (status) {
-                    case VERIFIED -> Boolean.TRUE.equals(current) ? Action.NONE : Action.ALLOW;
-                    case BLOCKED -> Boolean.FALSE.equals(current) ? Action.NONE : Action.DENY;
-                    case FLAGGED -> allowedAnyway
+                boolean allowedAnyway = state.allowedAnyway().containsKey(sha);
+                boolean needsPermission = status == Verifier.Status.FLAGGED || suspicious;
+                Action action;
+                if (status == Verifier.Status.VERIFIED) {
+                    action = Boolean.TRUE.equals(current) ? Action.NONE : Action.ALLOW;
+                } else if (status == Verifier.Status.BLOCKED || status == Verifier.Status.INVALID) {
+                    action = Boolean.FALSE.equals(current) ? Action.NONE : Action.DENY;
+                } else if (needsPermission) {
+                    action = allowedAnyway
                             ? (Boolean.TRUE.equals(current) ? Action.NONE : Action.ALLOW)
                             : (Boolean.FALSE.equals(current) ? Action.NONE : Action.DENY);
-                    default -> state.autoApproved().containsKey(sha) ? Action.ASK_IN_GAME : Action.NONE;
-                };
-                rows.add(new Row(mod, jar, status, info, current, action, allowedAnyway));
+                } else {
+                    action = state.autoApproved().containsKey(sha) ? Action.ASK_IN_GAME : Action.NONE;
+                }
+                rows.add(new Row(mod, jar, status, info, current, action, allowedAnyway, scan, suspicious));
             }
         }
         return rows;
+    }
+
+    static Optional<Scanner.Report> scan(JavaMods.Jar jar) {
+        return SCANS.computeIfAbsent(jar.sha256(), sha -> {
+            try {
+                return Optional.of(Scanner.scan(jar.path()));
+            } catch (IOException | RuntimeException e) {
+                return Optional.empty();
+            }
+        });
+    }
+
+    /** Short text such as "local scan: no findings" or "local scan found: process, native". */
+    static String describeScan(Optional<Scanner.Report> report) {
+        if (report.isEmpty()) {
+            return "local scan: jar could not be read";
+        }
+        Scanner.Report r = report.get();
+        if (r.hasHardFindings()) {
+            return "local scan found: " + rules(r, Scanner.Severity.HARD);
+        }
+        if (r.findings().isEmpty()) {
+            return "local scan: no findings";
+        }
+        return "local scan, check: " + rules(r, Scanner.Severity.SOFT);
+    }
+
+    private static String rules(Scanner.Report r, Scanner.Severity severity) {
+        Set<String> rules = new LinkedHashSet<>();
+        for (Scanner.Finding f : r.findings()) {
+            if (f.severity() == severity) {
+                rules.add(f.rule());
+            }
+        }
+        return String.join(", ", rules);
     }
 
     /** Applies the planned actions to ZombieBuddy's approvals and BiteCheck's own state. */

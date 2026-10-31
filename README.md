@@ -22,6 +22,7 @@ BiteCheck works together with [ZombieBuddy](https://github.com/zed-0xff/ZombieBu
 
 - **Verified mods** load without any prompt.
 - **Unverified mods** still work, just like with ZombieBuddy: ZombieBuddy warns you in game and asks before loading each one. Your choice is remembered for that exact file only.
+- **Suspicious mods**: until a mod is reviewed, BiteCheck scans it locally. If the scan finds a process start, native code, runtime code loading or obfuscation, the mod is not loaded unless you allow it anyway (double confirmation). The local scan is a quick check, not a review.
 - **Flagged mods** are not loaded unless you allow them anyway (double confirmation).
 - **Mods with confirmed malware** are on a block list and never load.
 - **Lua mods** are loaded by the game itself and are not affected by BiteCheck at all.

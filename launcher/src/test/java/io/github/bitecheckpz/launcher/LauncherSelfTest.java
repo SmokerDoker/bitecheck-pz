@@ -84,11 +84,39 @@ public final class LauncherSelfTest {
             expect(status(s, "good.jar"), Verifier.Status.FLAGGED);
             expect(action(s, "good.jar"), Planner.Action.DENY);
             s.apply();
-            s.state.allowedFlagged().put(w.sha("good.jar"), "test");
+            s.state.allowedAnyway().put(w.sha("good.jar"), "test");
             Session again = s.replan();
             expect(action(again, "good.jar"), Planner.Action.ALLOW);
             again.apply();
             expect(ZombieBuddyApprovals.load(w.zb).decision(w.sha("good.jar")), Boolean.TRUE);
+        });
+        run("scan: unverified mod with hard findings is blocked as suspicious", () -> {
+            World w = World.create();
+            Session s = w.session();
+            Planner.Row shady = row(s, "shady.jar");
+            expect(shady.status(), Verifier.Status.UNVERIFIED);
+            expect(shady.suspicious(), true);
+            expect(shady.action(), Planner.Action.DENY);
+            expect(row(s, "unknown.jar").suspicious(), false);
+            expect(row(s, "unknown.jar").info().contains("local scan: no findings"), true);
+            s.apply();
+            expect(ZombieBuddyApprovals.load(w.zb).decision(w.sha("shady.jar")), Boolean.FALSE);
+        });
+        run("scan: player can allow a suspicious mod anyway", () -> {
+            World w = World.create();
+            Session s = w.session();
+            s.state.allowedAnyway().put(w.sha("shady.jar"), "test");
+            Session again = s.replan();
+            expect(action(again, "shady.jar"), Planner.Action.ALLOW);
+            again.apply();
+            expect(ZombieBuddyApprovals.load(w.zb).decision(w.sha("shady.jar")), Boolean.TRUE);
+        });
+        run("scan: verified mods are not blocked by the local scan", () -> {
+            World w = World.create();
+            w.publishIndex(Instant.now().plusSeconds(60), Map.of("verified", w.sha("shady.jar")));
+            Session s = w.session();
+            expect(status(s, "shady.jar"), Verifier.Status.VERIFIED);
+            expect(action(s, "shady.jar"), Planner.Action.ALLOW);
         });
         run("index: older index is rejected (rollback)", () -> {
             World w = World.create();
@@ -207,6 +235,7 @@ public final class LauncherSelfTest {
             Files.createDirectories(w.biteCheck);
             w.mod(w.modsDir, "Good", "good.jar", "good bytes");
             w.mod(w.modsDir, "Unknown", "unknown.jar", "unknown bytes");
+            w.mod(w.modsDir, "Shady", "shady.jar", "shady with native code");
             w.mod(workshop.resolve("999/mods"), "Evil", "evil.jar", "evil bytes");
             // a decision the player made earlier for some other jar
             ZombieBuddyApprovals a = ZombieBuddyApprovals.load(w.zb);
@@ -234,21 +263,30 @@ public final class LauncherSelfTest {
             return io.github.bitecheckpz.core.Toml.quote(s);
         }
 
+        final Map<String, Path> jars = new java.util.HashMap<>();
+
+        /** Creates a mod folder with a real jar holding one entry (and optionally a native library). */
         void mod(Path parent, String id, String jarName, String content) throws IOException {
             Path dir = parent.resolve(id);
             Files.createDirectories(dir.resolve("42/media/java"));
             Files.writeString(dir.resolve("42/mod.info"), "id=" + id + "\nname=" + id + "\njavaJarFile=media/java/"
                     + jarName + "\njavaPkgName=test." + id.toLowerCase() + "\n");
-            Files.writeString(dir.resolve("42/media/java/" + jarName), content);
+            Path jar = dir.resolve("42/media/java/" + jarName);
+            try (var zip = new java.util.zip.ZipOutputStream(Files.newOutputStream(jar))) {
+                zip.putNextEntry(new java.util.zip.ZipEntry("content.txt"));
+                zip.write(content.getBytes(StandardCharsets.UTF_8));
+                zip.closeEntry();
+                if (content.contains("native")) {
+                    zip.putNextEntry(new java.util.zip.ZipEntry("natives/helper.dll"));
+                    zip.write(new byte[] {1, 2, 3});
+                    zip.closeEntry();
+                }
+            }
+            jars.put(jarName, jar);
         }
 
-        String sha(String jarName) {
-            String content = switch (jarName) {
-                case "good.jar" -> "good bytes";
-                case "unknown.jar" -> "unknown bytes";
-                default -> "evil bytes";
-            };
-            return Hashing.sha256Hex(content.getBytes(StandardCharsets.UTF_8));
+        String sha(String jarName) throws IOException {
+            return Hashing.sha256Hex(jars.get(jarName));
         }
 
         /** Writes and signs an index; sections map: "verified"/"flagged"/"blocked" -> hash. */

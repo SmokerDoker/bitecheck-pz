@@ -19,7 +19,7 @@ import java.util.TreeMap;
  * <ul>
  *   <li>which approvals it wrote into ZombieBuddy's file itself, so it can take them back when a
  *       mod loses its verification,</li>
- *   <li>flagged mods the player decided to allow anyway,</li>
+ *   <li>flagged or suspicious mods the player decided to allow anyway,</li>
  *   <li>the newest index it accepted, so an older index cannot be replayed.</li>
  * </ul>
  */
@@ -27,7 +27,7 @@ public final class LauncherState {
 
     private final Path file;
     private final Map<String, String> autoApproved = new TreeMap<>();
-    private final Map<String, String> allowedFlagged = new TreeMap<>();
+    private final Map<String, String> allowedAnyway = new TreeMap<>();
     private Instant newestIndex;
 
     private LauncherState(Path file) {
@@ -46,7 +46,7 @@ public final class LauncherState {
             throw new IOException("invalid state file: " + e.getMessage(), e);
         }
         copyHashes(Toml.table(doc, "auto_approved"), state.autoApproved);
-        copyHashes(Toml.table(doc, "allowed_flagged"), state.allowedFlagged);
+        copyHashes(Toml.table(doc, "allowed_anyway"), state.allowedAnyway);
         String newest = Toml.string(doc, "newest_index");
         if (newest != null) {
             try {
@@ -70,8 +70,8 @@ public final class LauncherState {
         return autoApproved;
     }
 
-    public Map<String, String> allowedFlagged() {
-        return allowedFlagged;
+    public Map<String, String> allowedAnyway() {
+        return allowedAnyway;
     }
 
     public Optional<Instant> newestIndex() {
@@ -91,8 +91,8 @@ public final class LauncherState {
         }
         out.append("\n[auto_approved]\n");
         autoApproved.forEach((k, v) -> out.append(k).append(" = ").append(Toml.quote(v)).append('\n'));
-        out.append("\n[allowed_flagged]\n");
-        allowedFlagged.forEach((k, v) -> out.append(k).append(" = ").append(Toml.quote(v)).append('\n'));
+        out.append("\n[allowed_anyway]\n");
+        allowedAnyway.forEach((k, v) -> out.append(k).append(" = ").append(Toml.quote(v)).append('\n'));
         Files.createDirectories(file.getParent());
         Path tmp = file.resolveSibling(file.getFileName() + ".tmp");
         Files.writeString(tmp, out.toString(), StandardCharsets.UTF_8);
