@@ -40,23 +40,27 @@ if not defined JAVAW goto nojava
 
 :found
 
-if "%~1"=="" goto window
 rem Command line use (Steam: --wrap %%command%%, --status, ...): run in this console and wait,
-rem so Steam sees the game running and the exit code is passed on.
+rem so Steam sees the game running and the exit code is passed on. Otherwise open the window.
+set "ARGS=%*"
+set "CONSOLE="
+if defined ARGS for %%o in (--wrap --status --sync --launch --steam-options --allow --revoke --export --compare --help --version) do if not "!ARGS:%%o=!"=="!ARGS!" set "CONSOLE=1"
+if not defined CONSOLE goto window
 set "JAVA=!JAVAW:javaw.exe=java.exe!"
 if /i "!JAVA!"=="javaw" set "JAVA=java"
 "%JAVA%" -Dbitecheck.script="%~f0" -jar "%JAR%" %*
 exit /b %ERRORLEVEL%
 
 :window
-start "" "%JAVAW%" -Dbitecheck.script="%~f0" -jar "%JAR%"
+start "" "%JAVAW%" -Dbitecheck.script="%~f0" -jar "%JAR%" %*
 exit /b 0
 
 :nojava
 rem Started from Steam (--wrap): never keep the game from starting, run it without the check.
-if /i not "%~1"=="--wrap" goto nojava_message
-echo BiteCheck: no Java runtime found, starting the game without the check.
 set "GAME=%*"
+if not defined GAME goto nojava_message
+if "!GAME:--wrap =!"=="!GAME!" goto nojava_message
+echo BiteCheck: no Java runtime found, starting the game without the check.
 set "GAME=!GAME:*--wrap =!"
 !GAME!
 exit /b !ERRORLEVEL!
