@@ -1,0 +1,6 @@
+name=BiteCheck Test: Verified
+id=BiteCheckTestVerified
+description=Harmless test mod for BiteCheck. Listed as VERIFIED in the BiteCheck test index: should load without a question. It only prints one line to the log.
+require=\ZombieBuddy
+javaJarFile=media/java/BiteCheckTestVerified.jar
+javaPkgName=io.github.bitecheckpz.testmods.verified

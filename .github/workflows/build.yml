@@ -21,11 +21,18 @@ jobs:
           distribution: temurin
           java-version: "21"
       - name: Build and run self tests
-        run: ./gradlew --no-daemon check :cli:installDist
+        run: ./gradlew --no-daemon check :cli:installDist :launcher:launcherZip
       - name: Check that the build is reproducible
         run: |
-          sha256sum cli/build/libs/*.jar core/build/libs/*.jar > first.sha256
-          ./gradlew --no-daemon clean :cli:jar :core:jar
+          sha256sum cli/build/libs/*.jar core/build/libs/*.jar launcher/build/libs/*.jar > first.sha256
+          ./gradlew --no-daemon clean :cli:jar :core:jar :launcher:jar :launcher:fatJar
           sha256sum -c first.sha256
       - name: Smoke test
-        run: cli/build/install/bcz/bin/bcz --help
+        run: |
+          ./gradlew --no-daemon -q :cli:installDist :launcher:launcherZip
+          cli/build/install/bcz/bin/bcz --help
+          java -jar launcher/build/libs/BiteCheck.jar --version
+      - uses: actions/upload-artifact@v4
+        with:
+          name: BiteCheck-launcher
+          path: launcher/build/distributions/*.zip

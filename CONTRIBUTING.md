@@ -20,9 +20,44 @@ Requirements for a release:
 - Network access and file access outside `~/Zomboid` must be explained in the mod description and will be checked carefully in review.
 - Game classes from The Indie Stone are referenced at compile time only (`compileOnly`) and never bundled.
 
+### Making your build reproducible
+
+CI builds your release twice on different machines; both jars must be byte-identical. With Gradle this usually takes three lines:
+
+```kotlin
+tasks.withType<AbstractArchiveTask>().configureEach {
+    isPreserveFileTimestamps = false
+    isReproducibleFileOrder = true
+}
+```
+
+Also: pin your Gradle version with the wrapper, use the JDK named in your release file (`jdk = "temurin-25"`), don't put build dates or machine names into the jar, and pin dependency versions. Check locally by building twice and comparing `bcz hash` of both jars.
+
+Your release file (`registry/mods/<mod>/releases/<version>.toml`) names the exact commit and how to build it:
+
+```toml
+mod = "my-mod"
+version = "1.0.0"
+commit = "<full 40-character commit hash>"
+
+[build]
+jdk = "temurin-25"
+command = "./gradlew --no-daemon jar"
+artifact = "build/libs/my-mod.jar"
+```
+
+Sign it with `bcz sign <file> --key ~/.bitecheck/keys/<you>.key` and open a pull request with both files (and `mod.toml` plus your `keys/authors/<you>.pub` for a new mod).
+
 ## 2. Review mods (reviewers)
 
 Anyone can review. Reviews from new accounts are visible but do not count toward approval until the reviewer has built up reputation (see the specification).
+
+Download the jar CI built (artifact `mod-<mod>-<version>` of the pull request's "Mod submission" run), read the source at the release commit and the scan results, then:
+
+```sh
+bcz review registry/mods/<mod>/releases/<version>.toml mod.jar --reviewer <you> --verdict approve --notes "…"
+bcz sign registry/mods/<mod>/reviews/<version>/<you>.toml --key ~/.bitecheck/keys/<you>.key
+```
 
 A review must state what was checked (full review or diff to the previous version) and explain every soft scanner finding. If you find something malicious, **flag it immediately** — a critical flag removes the approval for all players until it is resolved.
 
