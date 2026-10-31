@@ -145,6 +145,10 @@ public final class Platform {
         if (configured.isPresent()) {
             return configured;
         }
+        Optional<Path> server = config.path("server_dir");
+        if (server.isPresent()) {
+            return server;
+        }
         for (Path lib : steamLibraries()) {
             Path dir = lib.resolve("steamapps/common/ProjectZomboid");
             if (Files.isDirectory(dir)) {
@@ -158,6 +162,8 @@ public final class Platform {
     public List<Path> workshopContentDirs() {
         List<Path> result = new ArrayList<>();
         config.path("workshop_dir").ifPresent(result::add);
+        config.path("server_dir").map(d -> d.resolve("steamapps/workshop/content/" + PZ_APP_ID))
+                .filter(Files::isDirectory).ifPresent(result::add);
         for (Path lib : steamLibraries()) {
             Path dir = lib.resolve("steamapps/workshop/content/" + PZ_APP_ID);
             if (Files.isDirectory(dir)) {

@@ -27,6 +27,8 @@ import java.util.concurrent.ConcurrentHashMap;
  *       allowed it anyway (double confirmation)</td></tr>
  *   <tr><td>FLAGGED</td><td>deny, unless the player allowed it anyway (double confirmation)</td></tr>
  *   <tr><td>BLOCKED</td><td>deny - never loads</td></tr>
+ *   <tr><td>UNVERIFIED, allowed ahead of time with {@code --allow}</td><td>allow (e.g. on a dedicated
+ *       server, where ZombieBuddy runs with {@code policy=deny-new} and cannot ask)</td></tr>
  * </table>
  *
  * <p>The local scan is a provisional check for mods nobody has reviewed yet. It catches obvious
@@ -93,6 +95,9 @@ public final class Planner {
                     action = allowedAnyway
                             ? (Boolean.TRUE.equals(current) ? Action.NONE : Action.ALLOW)
                             : (Boolean.FALSE.equals(current) ? Action.NONE : Action.DENY);
+                } else if (allowedAnyway) {
+                    // unverified, approved ahead of time by the player or server admin (--allow)
+                    action = Boolean.TRUE.equals(current) ? Action.NONE : Action.ALLOW;
                 } else {
                     action = state.autoApproved().containsKey(sha) ? Action.ASK_IN_GAME : Action.NONE;
                 }

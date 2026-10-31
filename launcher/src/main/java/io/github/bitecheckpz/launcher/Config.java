@@ -6,6 +6,7 @@ import java.io.IOException;
 import java.net.URI;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.Optional;
 
@@ -19,6 +20,7 @@ import java.util.Optional;
  * zomboid_dir = "…"                      # instead of ~/Zomboid
  * zombiebuddy_dir = "…"                  # instead of ~/.zombie_buddy
  * steam_dir = "…", game_dir = "…", workshop_dir = "…"
+ * server_dir = "…"                       # dedicated server install (SteamCMD); sets game and workshop folders
  * </pre>
  */
 public final class Config {
@@ -44,6 +46,17 @@ public final class Config {
         } catch (Toml.TomlException e) {
             throw new IOException("invalid config: " + e.getMessage(), e);
         }
+    }
+
+    /** A copy with some values replaced, e.g. from command line options. Values are used as given. */
+    public Config with(Map<String, String> overrides) {
+        Map<String, Object> merged = new LinkedHashMap<>(values);
+        for (Map.Entry<String, String> e : overrides.entrySet()) {
+            String v = e.getValue();
+            merged.put(e.getKey(), Path.of(v).isAbsolute() || v.contains("://") ? v
+                    : Path.of(v).toAbsolutePath().normalize().toString());
+        }
+        return new Config(file, merged);
     }
 
     public Optional<String> string(String key) {
