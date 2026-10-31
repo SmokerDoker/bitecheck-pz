@@ -96,9 +96,13 @@ jobs:
           path: b
       - name: Check both builds and scan
         run: |
-          test "$(cat a/sha256.txt)" = "$(cat b/sha256.txt)" || { echo "::error::builds differ"; exit 1; }
-          test "$(sha256sum a/mod.jar | cut -d' ' -f1)" = "$(cat a/sha256.txt)"
-          cli/build/install/bcz/bin/bcz scan a/mod.jar --format markdown >> "$GITHUB_STEP_SUMMARY"
+          diff -q a/sha256.txt b/sha256.txt || { echo "::error::builds differ"; exit 1; }
+          i=0
+          while read -r sha path; do
+            test "$(sha256sum "a/$i.jar" | cut -d' ' -f1)" = "$sha"
+            cli/build/install/bcz/bin/bcz scan "a/$i.jar" --format markdown >> "$GITHUB_STEP_SUMMARY"
+            i=$((i + 1))
+          done < a/sha256.txt
       - name: Write and sign the build record
         env:
           RELEASE: ${{ matrix.release }}
@@ -111,7 +115,10 @@ jobs:
           umask 077
           printf '%s\n' "$REGISTRY_KEY" > "$RUNNER_TEMP/registry.key"
           bcz=cli/build/install/bcz/bin/bcz
-          $bcz build-record "$RELEASE" a/mod.jar --builder github-ubuntu-24.04 --builder github-ubuntu-22.04
+          jars=()
+          n=$(wc -l < a/sha256.txt)
+          for ((i = 0; i < n; i++)); do jars+=("a/$i.jar"); done
+          $bcz build-record "$RELEASE" "${jars[@]}" --builder github-ubuntu-24.04 --builder github-ubuntu-22.04
           build="${RELEASE%.toml}.build.toml"
           $bcz sign "$build" --key "$RUNNER_TEMP/registry.key"
           rm -f "$RUNNER_TEMP/registry.key"

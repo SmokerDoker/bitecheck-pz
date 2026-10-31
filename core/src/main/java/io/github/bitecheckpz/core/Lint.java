@@ -21,7 +21,7 @@ public final class Lint {
     private static final Set<String> SCOPES = Set.of("full", "diff");
     private static final Set<String> SEVERITIES = Set.of("info", "suspicion", "critical");
     private static final Set<String> FLAG_STATUSES = Set.of("open", "resolved", "confirmed");
-    private static final Set<String> MOD_STATUSES = Set.of("active", "suspended", "withdrawn");
+    private static final Set<String> MOD_STATUSES = Set.of("active", "pending", "suspended", "withdrawn");
 
     private final Registry registry;
     private final Optional<Keys.PublicKeyInfo> registryKey;
@@ -56,6 +56,17 @@ public final class Lint {
                 for (String key : Toml.table(doc, "blocked").keySet()) {
                     if (!Hashing.isSha256Hex(key)) {
                         error(blocklist, "'" + key + "' is not a SHA-256 hash");
+                    }
+                }
+            }
+        }
+        Path policy = root.resolve("registry/policy.toml");
+        if (Files.isRegularFile(policy)) {
+            Map<String, Object> doc = parse(policy);
+            if (doc != null) {
+                for (String key : List.of("required_approvals", "required_trusted")) {
+                    if (doc.containsKey(key) && !(doc.get(key) instanceof Long n && n >= 1 && n <= 10)) {
+                        error(policy, key + " must be a number from 1 to 10");
                     }
                 }
             }
@@ -125,11 +136,14 @@ public final class Lint {
             return;
         }
         boolean example = Toml.bool(modInfo, "example");
+        // Pending entries are prepared but not signed yet: structure is checked, signatures are not.
+        boolean unsigned = example || "pending".equals(Toml.string(modInfo, "status"));
         if (!mod.equals(Toml.string(modInfo, "id"))) {
             error(modFile, "id must be \"" + mod + "\"");
         }
-        String author = Toml.string(modInfo, "author");
+        String author = Registry.signer(modInfo);
         require(modFile, modInfo, "name");
+        require(modFile, modInfo, "author");
         require(modFile, modInfo, "license");
         String source = Toml.string(modInfo, "source");
         if (source == null || !source.startsWith("https://")) {
@@ -137,12 +151,13 @@ public final class Lint {
         }
         String status = Toml.string(modInfo, "status");
         if (status != null && !MOD_STATUSES.contains(status)) {
-            error(modFile, "status must be active, suspended or withdrawn");
+            error(modFile, "status must be active, pending, suspended or withdrawn");
         }
         Optional<Keys.PublicKeyInfo> authorKey = Optional.empty();
         if (author == null || !Registry.NAME.matcher(author).matches()) {
-            error(modFile, "author must be a valid name");
-        } else if (!example) {
+            error(modFile, Toml.string(modInfo, "publisher") != null ? "publisher must be a valid name"
+                    : "author must be a valid name, or set a publisher who signs the releases");
+        } else if (!unsigned) {
             authorKey = registry.authorKey(author);
             if (authorKey.isEmpty()) {
                 error(modFile, "no key keys/authors/" + author + ".pub");
@@ -160,7 +175,7 @@ public final class Lint {
                 } else if (name.endsWith(".build.toml")) {
                     checkBuild(f, mod);
                 } else if (name.endsWith(".toml")) {
-                    checkRelease(f, mod, example, authorKey);
+                    checkRelease(f, mod, unsigned, authorKey);
                 } else {
                     error(f, "unexpected file");
                 }
@@ -186,7 +201,7 @@ public final class Lint {
         }
     }
 
-    private void checkRelease(Path f, String mod, boolean example, Optional<Keys.PublicKeyInfo> authorKey) {
+    private void checkRelease(Path f, String mod, boolean unsigned, Optional<Keys.PublicKeyInfo> authorKey) {
         Map<String, Object> doc = parse(f);
         if (doc == null) {
             return;
@@ -205,9 +220,28 @@ public final class Lint {
             error(f, "commit must be a full 40-character git commit hash");
         }
         Map<String, Object> build = Toml.table(doc, "build");
-        for (String key : List.of("jdk", "command", "artifact")) {
-            if (Toml.string(build, key) == null && !example) {
-                error(f, "[build] needs " + key);
+        String type = Toml.string(build, "type");
+        if (type != null && !type.equals("rebuild") && !type.equals("published")) {
+            error(f, "[build] type must be rebuild or published");
+        }
+        boolean published = "published".equals(type);
+        List<String> artifacts = Releases.artifacts(doc);
+        if (artifacts.isEmpty()) {
+            error(f, "[build] needs artifact (or artifacts = [...] for a published release)");
+        }
+        for (String artifact : artifacts) {
+            if (!Releases.isSafeArtifactPath(artifact)) {
+                error(f, "[build] artifact '" + artifact + "' must be a relative .jar path without spaces or '..'");
+            }
+        }
+        if (!published) {
+            for (String key : List.of("jdk", "command")) {
+                if (Toml.string(build, key) == null) {
+                    error(f, "[build] needs " + key);
+                }
+            }
+            if (artifacts.size() > 1) {
+                error(f, "a rebuild release has exactly one artifact");
             }
         }
         String jdk = Toml.string(build, "jdk");
@@ -218,14 +252,10 @@ public final class Lint {
         if (command != null && (command.contains("\n") || command.contains("\r"))) {
             error(f, "[build] command must be a single line");
         }
-        String artifact = Toml.string(build, "artifact");
-        if (artifact != null && (artifact.startsWith("/") || artifact.contains("..") || artifact.contains("\\"))) {
-            error(f, "[build] artifact must be a relative path inside the project");
-        }
-        if (!example && authorKey.isPresent()) {
+        if (!unsigned && authorKey.isPresent()) {
             Signatures.Check sig = Signatures.verify(f, authorKey.get());
             if (sig != Signatures.Check.VALID) {
-                error(f, "author signature: " + sig.description());
+                error(f, "publisher signature: " + sig.description());
             }
         }
     }
@@ -238,10 +268,11 @@ public final class Lint {
         if (!mod.equals(Toml.string(doc, "mod"))) {
             error(f, "mod must be \"" + mod + "\"");
         }
-        for (String key : List.of("release_sha256", "jar_sha256")) {
-            if (!Hashing.isSha256Hex(Toml.string(doc, key))) {
-                error(f, key + " must be a SHA-256 hash");
-            }
+        if (!Hashing.isSha256Hex(Toml.string(doc, "release_sha256"))) {
+            error(f, "release_sha256 must be a SHA-256 hash");
+        }
+        if (Registry.jarHashes(doc).isEmpty()) {
+            error(f, "needs jar_sha256 or artifact_sha256 = [...]");
         }
         if (registryKey.isPresent()) {
             Signatures.Check sig = Signatures.verify(f, registryKey.get());
@@ -262,13 +293,13 @@ public final class Lint {
             error(f, "reviewer must match the file name");
         }
         if (reviewer.equals(author)) {
-            error(f, "authors cannot review their own mod");
+            error(f, "the publisher cannot review their own entry");
         }
         if (!mod.equals(Toml.string(doc, "mod")) || !version.equals(Toml.string(doc, "version"))) {
             error(f, "mod/version do not match the folder");
         }
-        if (!Hashing.isSha256Hex(Toml.string(doc, "jar_sha256"))) {
-            error(f, "jar_sha256 must be a SHA-256 hash");
+        if (!Hashing.isSha256Hex(Toml.string(doc, "jar_sha256")) && !Hashing.isSha256Hex(Toml.string(doc, "build_sha256"))) {
+            error(f, "needs jar_sha256 or build_sha256");
         }
         if (!VERDICTS.contains(String.valueOf(Toml.string(doc, "verdict")))) {
             error(f, "verdict must be approve, reject or questions");

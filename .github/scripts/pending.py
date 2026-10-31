@@ -15,7 +15,7 @@ for release in sorted(pathlib.Path("registry/mods").glob("*/releases/*.toml")):
         mod = tomllib.loads(mod_file.read_text(encoding="utf-8"))
     except (OSError, tomllib.TOMLDecodeError):
         continue
-    if mod.get("example") is True:
+    if mod.get("example") is True or mod.get("status") == "pending":
         continue
     key = re.sub(r"[^A-Za-z0-9.-]", "-", f"{release.parent.parent.name}-{release.name[:-5]}")
     entries.append({"release": release.as_posix(), "key": key})
