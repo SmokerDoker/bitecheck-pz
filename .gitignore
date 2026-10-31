@@ -9,6 +9,7 @@ build/
 .gradle/
 out/
 *.jar
+!gradle/wrapper/gradle-wrapper.jar
 
 # Editors and OS
 .idea/
