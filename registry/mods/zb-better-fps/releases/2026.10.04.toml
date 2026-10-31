@@ -1,0 +1,7 @@
+mod = "zb-better-fps"
+version = "2026.10.04"
+commit = "e0159bdb508d940d784878487d022972ae245507"
+
+[build]
+type = "published"
+artifacts = ["41/media/java/client/ZBBetterFPS-2x.jar", "41/media/java/client/ZBBetterFPS.jar", "42.12/media/java/client/ZBBetterFPS-2x.jar", "42.12/media/java/client/ZBBetterFPS.jar", "42.13/media/java/client/ZBBetterFPS-2x.jar", "42.13/media/java/client/ZBBetterFPS.jar", "42.20/media/java/client/ZBBetterFPS.jar"]

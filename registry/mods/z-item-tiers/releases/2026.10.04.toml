@@ -1,0 +1,7 @@
+mod = "z-item-tiers"
+version = "2026.10.04"
+commit = "3958fd7c658c2134f8eaaa9baa8abc813b05669f"
+
+[build]
+type = "published"
+artifacts = ["42.13/media/java/shared/ZItemTiers-2x.jar", "42.13/media/java/shared/ZItemTiers.jar"]

@@ -1,0 +1,8 @@
+id = "zb-better-fps"
+name = "Zed's Better FPS"
+author = "Zed (zed-0xff)"
+publisher = "smokerdoker"
+source = "https://github.com/zed-0xff/ZBBetterFPS"
+license = "MIT"
+workshop_id = ""
+status = "pending"

@@ -1,0 +1,8 @@
+id = "zb-hello-world"
+name = "ZBHelloWorld"
+author = "Zed (zed-0xff)"
+publisher = "smokerdoker"
+source = "https://github.com/zed-0xff/ZBHelloWorld"
+license = "MIT"
+workshop_id = ""
+status = "pending"
