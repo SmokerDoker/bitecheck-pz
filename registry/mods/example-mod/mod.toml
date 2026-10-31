@@ -1,0 +1,11 @@
+# EXAMPLE ONLY - shows the format of a mod entry.
+id = "example-mod"
+name = "Example Mod"
+example = true
+
+author = "example-author"            # must match keys/authors/<author>.pub
+source = "https://github.com/example-author/example-mod"
+license = "MIT"                      # SPDX identifier
+workshop_id = ""                     # optional Steam Workshop ID
+
+status = "active"                    # active | suspended | withdrawn

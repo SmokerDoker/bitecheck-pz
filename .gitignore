@@ -1,0 +1,18 @@
+# Never commit private keys
+*.key
+*.sec
+*.pem
+!keys/**/*.pub
+
+# Build output
+build/
+.gradle/
+out/
+*.jar
+
+# Editors and OS
+.idea/
+.vscode/
+*.iml
+.DS_Store
+Thumbs.db

@@ -1,0 +1,36 @@
+name: Validate registry
+
+on:
+  pull_request:
+    paths:
+      - "registry/**"
+      - "keys/**"
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  toml:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Check that every registry file is valid TOML
+        run: |
+          python - <<'EOF'
+          import pathlib, sys, tomllib
+          errors = 0
+          for path in sorted(pathlib.Path("registry").rglob("*.toml")):
+              try:
+                  with path.open("rb") as f:
+                      tomllib.load(f)
+                  print(f"ok    {path}")
+              except tomllib.TOMLDecodeError as e:
+                  errors += 1
+                  print(f"ERROR {path}: {e}")
+          sys.exit(1 if errors else 0)
+          EOF
