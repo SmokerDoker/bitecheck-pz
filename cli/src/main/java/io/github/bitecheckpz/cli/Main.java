@@ -8,6 +8,7 @@ import io.github.bitecheckpz.core.Keys;
 import io.github.bitecheckpz.core.Records;
 import io.github.bitecheckpz.core.Registry;
 import io.github.bitecheckpz.core.Signatures;
+import io.github.bitecheckpz.core.Site;
 import io.github.bitecheckpz.core.Toml;
 import io.github.bitecheckpz.core.Verifier;
 
@@ -65,6 +66,8 @@ public final class Main {
                   Print source, commit and build settings of a release as name=value lines (for CI).
               bcz index [--registry <dir>] --registry-key <public-key> --out <file> [--commit <sha>]
                   Generate the launcher index from the registry (sign it afterwards).
+              bcz site [--registry <dir>] [--registry-key <public-key>] --out <dir> [--repo-url <url>]
+                  Generate the registry website (index.html) from the registry files.
 
             Options:
               -h, --help     Show this help.
@@ -103,6 +106,7 @@ public final class Main {
                 case "index" -> index(parsed, out);
                 case "release-info" -> releaseInfo(parsed, out);
                 case "source-check" -> sourceCheck(parsed, out);
+                case "site" -> site(parsed, out);
                 default -> throw new UsageException("unknown command '" + parsed.command + "'");
             };
         } catch (UsageException e) {
@@ -274,6 +278,23 @@ public final class Main {
         long verified = parsed.entries().values().stream()
                 .filter(e -> e.status() == Verifier.Status.VERIFIED).count();
         out.println("Wrote " + target + ": " + parsed.entries().size() + " entries, " + verified + " verified");
+        return OK;
+    }
+
+    private static int site(Args a, PrintStream out)
+            throws IOException, GeneralSecurityException, Toml.TomlException, UsageException {
+        Registry registry = new Registry(Path.of(a.option("registry").orElse(".")));
+        Optional<Keys.PublicKeyInfo> key = Optional.empty();
+        if (a.option("registry-key").isPresent()) {
+            key = Optional.of(Keys.readPublic(Path.of(a.option("registry-key").get())));
+        }
+        Path dir = Path.of(a.requiredOption("out"));
+        String repo = a.option("repo-url").orElse("https://github.com/SmokerDoker/bitecheck-pz");
+        List<Site.ModRow> mods = Site.collect(registry, key);
+        Files.createDirectories(dir);
+        Files.writeString(dir.resolve("index.html"), Site.render(mods, Instant.now(), repo, key.isPresent()),
+                StandardCharsets.UTF_8);
+        out.println("Wrote " + dir.resolve("index.html") + ": " + mods.size() + " mod(s)");
         return OK;
     }
 

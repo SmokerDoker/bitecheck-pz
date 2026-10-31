@@ -142,6 +142,25 @@ public final class SelfTest {
                     java.time.Instant.now(), ""));
             expect(Index.parse(file).lookup(Hashing.sha256Hex(f.jar)).status(), Verifier.Status.FLAGGED);
         });
+        run("site: lists mods with jar status, reviews and flags; escapes HTML", () -> {
+            Fixture f = Fixture.create();
+            java.util.List<Site.ModRow> mods = Site.collect(f.registry(), java.util.Optional.of(f.registryKey));
+            expect(mods.size(), 1);
+            expect(mods.get(0).badge(), "verified");
+            String html = Site.render(mods, java.time.Instant.now(), "https://example.invalid/repo", true);
+            expect(html.contains(Hashing.sha256Hex(f.jar)), true);
+            expect(html.contains(">bob<"), true);
+            f.addFlag("open", "critical");
+            Files.writeString(f.modDir.resolve("mod.toml"), Files.readString(f.modDir.resolve("mod.toml"))
+                    .replace("Better Guns", "Better <script>Guns"));
+            mods = Site.collect(f.registry(), java.util.Optional.of(f.registryKey));
+            expect(mods.get(0).badge(), "flagged");
+            html = Site.render(mods, java.time.Instant.now(), "https://example.invalid/repo", true);
+            expect(html.contains("Better &lt;script&gt;Guns"), true);
+            expect(html.contains("<script>Guns"), false);
+            // without the registry key nothing is shown as verified
+            expect(Site.collect(f.registry(), java.util.Optional.empty()).get(0).badge(), "in review");
+        });
         run("lint: valid registry has no problems", () -> {
             Fixture f = Fixture.create();
             expect(Lint.check(f.registry(), java.util.Optional.of(f.registryKey)), List.of());

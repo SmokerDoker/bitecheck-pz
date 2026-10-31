@@ -27,7 +27,7 @@ BiteCheck works together with [ZombieBuddy](https://github.com/zed-0xff/ZombieBu
 - **Mods with confirmed malware** are on a block list and never load.
 - **Lua mods** are loaded by the game itself and are not affected by BiteCheck at all.
 
-Under the hood BiteCheck writes allow/deny decisions per jar hash into ZombieBuddy's `~/.zombie_buddy/mod_approvals.json` and never touches anything else. If you start the game from Steam directly, ZombieBuddy's own questions still protect you. The launcher runs on Windows, macOS and Linux with the Java runtime that comes with Project Zomboid; no separate Java install is needed.
+Under the hood BiteCheck writes allow/deny decisions per jar hash into ZombieBuddy's `~/.zombie_buddy/mod_approvals.json` and never touches anything else. To check your mods every time you press Play in Steam, put BiteCheck into the game's launch options (the launcher's "Steam setup…" button shows the exact line, e.g. `"…\BiteCheck.bat" --wrap %command% -agentlib:zbNative --`). Without it, ZombieBuddy's own questions still protect you. Dedicated servers run BiteCheck the same way before the server starts, see [docs/SERVER.md](docs/SERVER.md). The launcher runs on Windows, macOS and Linux with the Java runtime that comes with Project Zomboid; no separate Java install is needed.
 
 ## How it works for modders
 
@@ -48,6 +48,9 @@ Your mod is never blocked while it waits for review: players can load it as an u
 - [x] Launcher for Windows, macOS and Linux on top of [ZombieBuddy](https://github.com/zed-0xff/ZombieBuddy)
 - [x] CI pipeline: double build, hash comparison, scanner, registry signature, signed index
 - [x] Test kit with three harmless test mods (`scripts/make-test-kit.sh`)
+- [x] Steam launch options integration (`--wrap %command%`) and dedicated server mode ([docs/SERVER.md](docs/SERVER.md))
+- [x] Registry website generated from the registry files (`bcz site`, GitHub Pages)
+- [x] First three mods prepared as pending entries with preliminary reviews ([docs/reviews](docs/reviews/README.md))
 - [ ] First test with real players
 - [ ] Registry key set up ([docs/SETUP-REGISTRY.md](docs/SETUP-REGISTRY.md)) and first real mods
 - [ ] `bcz login` / `bcz submit` (GitHub integration), mod template and Gradle plugin
@@ -67,6 +70,8 @@ bcz verify my-mod.jar --registry . --registry-key keys/registry.pub
 bcz scan my-mod.jar                         # APIs reviewers must check; exit 14 on hard findings
 bcz lint                                    # check all registry files and signatures
 bcz index --registry-key keys/registry.pub --out index.toml   # CI: launcher index
+bcz site --registry-key keys/registry.pub --out _site          # CI: registry website
+bcz source-check mod.jar java/src           # published jars: every class is declared in the source
 ```
 
 `bcz verify` prints `VERIFIED`, `UNVERIFIED`, `FLAGGED`, `BLOCKED` or `INVALID` with the reasons, and exits with 0, 10, 11, 12 or 13. See [registry/README.md](registry/README.md) for the exact rules.
@@ -95,6 +100,7 @@ keys/            Public keys of the registry, authors and reviewers
 | `validate-registry.yml` | PRs touching the registry | TOML check, `bcz lint` with tools from the base branch |
 | `submission.yml` | PRs adding a release | builds the mod twice on different runners, compares hashes, scans the jar |
 | `registry.yml` | merges to main, daily | rebuilds new releases, signs build records, publishes the signed index |
+| `site.yml` | registry changes, after `registry.yml` | registry website on GitHub Pages |
 | `release.yml` | tags `v*` | GitHub release with launcher and bcz downloads |
 
 Run the tests with `./gradlew check`.
