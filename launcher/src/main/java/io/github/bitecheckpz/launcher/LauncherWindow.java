@@ -45,6 +45,7 @@ final class LauncherWindow {
     private final JButton refresh = new JButton("Check again");
     private final JButton applyOnly = new JButton("Apply only");
     private final JButton start = new JButton("Start Project Zomboid");
+    private final JButton steamSetup = new JButton("Steam setup…");
     private Session session;
 
     private LauncherWindow(Path dir) {
@@ -101,6 +102,7 @@ final class LauncherWindow {
         content.add(center, BorderLayout.CENTER);
 
         JPanel buttons = new JPanel(new FlowLayout(FlowLayout.RIGHT, 8, 0));
+        buttons.add(steamSetup);
         buttons.add(allowFlagged);
         buttons.add(refresh);
         buttons.add(applyOnly);
@@ -112,6 +114,7 @@ final class LauncherWindow {
         refresh.addActionListener(e -> check());
         applyOnly.addActionListener(e -> apply(false));
         start.addActionListener(e -> apply(true));
+        steamSetup.addActionListener(e -> showSteamSetup());
 
         frame.setContentPane(content);
         frame.pack();
@@ -192,6 +195,25 @@ final class LauncherWindow {
 
     private static long count(List<Planner.Row> rows, Verifier.Status status) {
         return rows.stream().filter(r -> r.status() == status).count();
+    }
+
+    /** Shows the Steam launch options that run BiteCheck automatically, with a copy button. */
+    private void showSteamSetup() {
+        Platform platform = session != null ? session.platform : new Platform(Config.empty());
+        String help = SteamSetup.help(platform);
+        String line = SteamSetup.launchOptions(platform.os(), SteamSetup.script(platform.os()),
+                SteamSetup.currentLaunchOptions(platform).stream().findFirst());
+        JTextArea text = new JTextArea(help, 16, 70);
+        text.setEditable(false);
+        text.setLineWrap(true);
+        text.setWrapStyleWord(true);
+        Object[] options = {"Copy launch options", "Close"};
+        int choice = JOptionPane.showOptionDialog(frame, new JScrollPane(text), "Start BiteCheck from Steam",
+                JOptionPane.DEFAULT_OPTION, JOptionPane.INFORMATION_MESSAGE, null, options, options[0]);
+        if (choice == 0) {
+            java.awt.Toolkit.getDefaultToolkit().getSystemClipboard()
+                    .setContents(new java.awt.datatransfer.StringSelection(line), null);
+        }
     }
 
     private void allowSelectedFlagged() {

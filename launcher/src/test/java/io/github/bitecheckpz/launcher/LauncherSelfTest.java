@@ -142,6 +142,98 @@ public final class LauncherSelfTest {
             expect(status(s, "good.jar"), Verifier.Status.UNVERIFIED);
             expect(status(s, "evil.jar"), Verifier.Status.BLOCKED);
         });
+        run("steam: reads Project Zomboid's launch options from localconfig.vdf", () -> {
+            String vdf = """
+                    "UserLocalConfigStore" { "Software" { "Valve" { "Steam" { "apps" {
+                    	"440" { "LaunchOptions"	"-novid" }
+                    	"108600" { "LastPlayed" "1" "LaunchOptions"	"-agentlib:zbNative \\"x\\" --" "cloud" { "a" "b" } }
+                    } } } } }
+                    """;
+            expect(SteamSetup.launchOptionsFromVdf(vdf).orElse(null), "-agentlib:zbNative \"x\" --");
+            expect(SteamSetup.launchOptionsFromVdf("\"108600\" { \"x\" \"y\" }").isPresent(), false);
+        });
+        run("steam: launch options keep the player's own options", () -> {
+            Path script = Path.of("/games/BiteCheck/bitecheck.sh");
+            expect(SteamSetup.launchOptions(Platform.Os.LINUX, script, java.util.Optional.empty()),
+                    "\"/games/BiteCheck/bitecheck.sh\" --wrap %command% -javaagent:ZombieBuddy.jar --");
+            expect(SteamSetup.launchOptions(Platform.Os.WINDOWS, script, java.util.Optional.of("-agentlib:zbNative --")),
+                    "\"/games/BiteCheck/bitecheck.sh\" --wrap %command% -agentlib:zbNative --");
+            expect(SteamSetup.launchOptions(Platform.Os.LINUX, script, java.util.Optional.of("gamemoderun %command% -x")),
+                    "gamemoderun \"/games/BiteCheck/bitecheck.sh\" --wrap %command% -x");
+            String done = "\"/x/bitecheck.sh\" --wrap %command% -x";
+            expect(SteamSetup.launchOptions(Platform.Os.LINUX, script, java.util.Optional.of(done)), done);
+            expect(SteamSetup.isSetUp(java.util.Optional.of(done)), true);
+        });
+        run("wrap: applies the decisions, runs the game command and passes its exit code", () -> {
+            World w = World.create();
+            if (Platform.detectOs() == Platform.Os.WINDOWS) {
+                return;
+            }
+            Path marker = w.root.resolve("game-ran");
+            int code = LauncherMain.run(new String[] {"--dir", w.biteCheck.toString(), "--wrap", "sh", "-c",
+                "touch \"$0\"; exit 7", marker.toString()}, System.out, new java.io.PrintStream(
+                        java.io.OutputStream.nullOutputStream()));
+            expect(code, 7);
+            expect(Files.exists(marker), true);
+            ZombieBuddyApprovals a = ZombieBuddyApprovals.load(w.zb);
+            expect(a.decision(w.sha("good.jar")), Boolean.TRUE);
+            expect(a.decision(w.sha("evil.jar")), Boolean.FALSE);
+        });
+        run("wrap: the game still starts when BiteCheck fails", () -> {
+            World w = World.create();
+            if (Platform.detectOs() == Platform.Os.WINDOWS) {
+                return;
+            }
+            Files.writeString(w.biteCheck.resolve("config.toml"), "this is = = not toml\n");
+            int code = LauncherMain.run(new String[] {"--dir", w.biteCheck.toString(), "--wrap", "sh", "-c", "exit 0"},
+                    System.out, new java.io.PrintStream(java.io.OutputStream.nullOutputStream()));
+            expect(code, 0);
+        });
+        run("server: an unverified mod can be approved ahead of time and revoked", () -> {
+            World w = World.create();
+            var quiet = new java.io.PrintStream(java.io.OutputStream.nullOutputStream());
+            String dir = w.biteCheck.toString();
+            expect(LauncherMain.run(new String[] {"--dir", dir, "--allow", w.sha("unknown.jar")}, quiet, quiet), 0);
+            expect(ZombieBuddyApprovals.load(w.zb).decision(w.sha("unknown.jar")), Boolean.TRUE);
+            expect(LauncherMain.run(new String[] {"--dir", dir, "--sync"}, quiet, quiet), 0);
+            expect(ZombieBuddyApprovals.load(w.zb).decision(w.sha("unknown.jar")), Boolean.TRUE);
+            expect(LauncherMain.run(new String[] {"--dir", dir, "--revoke", w.sha("unknown.jar")}, quiet, quiet), 0);
+            expect(ZombieBuddyApprovals.load(w.zb).decision(w.sha("unknown.jar")), null);
+            // suspicious and blocked mods need more than a plain --allow
+            expect(LauncherMain.run(new String[] {"--dir", dir, "--allow", w.sha("shady.jar")}, quiet, quiet), 2);
+            expect(LauncherMain.run(new String[] {"--dir", dir, "--allow", w.sha("evil.jar"),
+                "--i-understand-the-risk"}, quiet, quiet), 1);
+        });
+        run("server: exported mod list matches itself and reports differences", () -> {
+            World w = World.create();
+            var quiet = new java.io.PrintStream(java.io.OutputStream.nullOutputStream());
+            Path list = w.root.resolve("server-mods.toml");
+            String dir = w.biteCheck.toString();
+            expect(LauncherMain.run(new String[] {"--dir", dir, "--export", list.toString()}, quiet, quiet), 0);
+            expect(LauncherMain.run(new String[] {"--dir", dir, "--compare", list.toString()}, quiet, quiet), 0);
+            List<ModList.Item> items = ModList.read(list);
+            expect(items.size(), 4);
+            expect(items.stream().anyMatch(i -> i.file().equals("42/media/java/good.jar")), true);
+            // the player has another version of Good and lacks Evil
+            Files.writeString(w.jars.get("good.jar"), "changed");
+            Files.delete(w.jars.get("evil.jar"));
+            Session s = w.session();
+            ModList.Diff diff = ModList.compare(ModList.of(s.rows), items);
+            expect(diff.different().size(), 1);
+            expect(diff.missing().size(), 1);
+            expect(diff.matches(), false);
+            expect(LauncherMain.run(new String[] {"--dir", dir, "--compare", list.toString()}, quiet, quiet),
+                    LauncherMain.MODS_DIFFER);
+        });
+        run("server: --server-dir finds mods in a SteamCMD install", () -> {
+            World w = World.create();
+            Path server = w.root.resolve("pzserver");
+            w.mod(server.resolve("steamapps/workshop/content/108600/12345/mods"), "ServerMod", "server.jar", "srv");
+            Session s = Session.run(w.biteCheck, Map.of("server_dir", server.toString()));
+            Planner.Row r = row(s, "server.jar");
+            expect(r.mod().workshopId(), "12345");
+            expect(s.platform.gameDir().orElseThrow(), server);
+        });
 
         System.out.println();
         System.out.println(passed + " passed, " + failures.size() + " failed");

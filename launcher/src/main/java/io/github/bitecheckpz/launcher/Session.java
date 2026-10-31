@@ -9,6 +9,7 @@ import java.nio.file.Path;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 
 /** One check run: find mods, load the index, plan the decisions. Shared by the window and the CLI. */
@@ -37,7 +38,12 @@ public final class Session {
     }
 
     public static Session run(Path biteCheckDir) throws IOException {
-        Config config = Config.load(biteCheckDir.resolve("config.toml"));
+        return run(biteCheckDir, Map.of());
+    }
+
+    /** @param overrides config values given on the command line, e.g. server_dir */
+    public static Session run(Path biteCheckDir, Map<String, String> overrides) throws IOException {
+        Config config = Config.load(biteCheckDir.resolve("config.toml")).with(overrides);
         Platform platform = new Platform(config);
         LauncherState state = LauncherState.load(biteCheckDir.resolve("state.toml"));
         ZombieBuddyApprovals approvals = ZombieBuddyApprovals.load(platform.zombieBuddyDir());
