@@ -77,11 +77,38 @@ Ablauf
    auch die Zeile für diese Mod erscheinen.
 
 
+8. Optional: Start direkt aus Steam (neu).
+   Steam -> Project Zomboid -> Rechtsklick -> Eigenschaften -> Allgemein ->
+   Startoptionen. Deine bisherige Zeile (z. B. -agentlib:zbNative --) notieren
+   und ersetzen durch:
+
+     "<Pfad zum Kit>\Start-Test-Windows.bat" --wrap %command% -agentlib:zbNative --
+
+   (<Pfad zum Kit> = der Ordner, in dem diese Anleitung liegt, z. B.
+   C:\Users\Du\Desktop\BiteCheck-TestKit). Für den Test bitte genau diese
+   Datei nehmen, nicht den "Steam setup..."-Knopf: der zeigt die Zeile für den
+   normalen Betrieb, ohne den Test-Index.
+
+   Dann in Steam auf "Spielen". Erwartet: ein schwarzes Konsolenfenster mit
+   "BiteCheck: ... Java mod jar(s) checked ...", danach startet das Spiel wie
+   gewohnt, mit denselben Ergebnissen wie in Schritt 5/6. Das Konsolenfenster
+   bleibt offen, solange das Spiel läuft, und schließt sich danach.
+   Hinterher die alte Startoption wieder eintragen.
+
+9. Optional: Kommandozeile. In einer Eingabeaufforderung im Kit-Ordner:
+     Start-Test-Windows.bat --status
+   zeigt alle Java-Mods mit Status und SHA-256.
+     Start-Test-Windows.bat --export meine-mods.toml
+     Start-Test-Windows.bat --compare meine-mods.toml
+   Das zweite sollte "OK: every Java mod jar in the list is installed ..." melden.
+
+
 Was ich von dir zurück brauche
 ------------------------------
 - Screenshot vom BiteCheck-Fenster (Schritt 4)
 - Hat ZombieBuddy nur nach "Unverified" gefragt? (Screenshot vom Dialog, falls möglich)
 - Die "[BiteCheck test]"-Zeilen aus console.txt
+- Falls du Schritt 8 gemacht hast: Hat der Start aus Steam geklappt?
 - Bei Problemen: Fehlermeldungen und die Datei
   %USERPROFILE%\.zombie_buddy\mod_approvals.json
 

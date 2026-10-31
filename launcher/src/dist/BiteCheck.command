@@ -28,11 +28,16 @@ find_java() {
 }
 
 JAVA="$(find_java)"
-if [ -z "$JAVA" ] && [ "$1" = "--wrap" ]; then
-    # Started from Steam: never keep the game from starting, run it without the check.
-    echo "BiteCheck: no Java runtime found, starting the game without the check." >&2
-    shift
-    exec "$@"
+if [ -z "$JAVA" ]; then
+    # Started from Steam (--wrap): never keep the game from starting, run it without the check.
+    for a in "$@"; do
+        if [ "$a" = "--wrap" ]; then
+            shift
+            echo "BiteCheck: no Java runtime found, starting the game without the check." >&2
+            exec "$@"
+        fi
+        shift
+    done
 fi
 if [ -z "$JAVA" ]; then
     osascript -e 'display alert "BiteCheck" message "Could not find Project Zomboid'"'"'s Java runtime or Java 21+. Install Project Zomboid through Steam."' >/dev/null 2>&1
