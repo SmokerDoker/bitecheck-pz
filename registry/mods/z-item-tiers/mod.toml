@@ -1,0 +1,8 @@
+id = "z-item-tiers"
+name = "Zed's Item Tiers"
+author = "Zed (zed-0xff)"
+publisher = "smokerdoker"
+source = "https://github.com/zed-0xff/ZItemTiers"
+license = "MIT"
+workshop_id = ""
+status = "pending"
