@@ -1,0 +1,22 @@
+# EXAMPLE ONLY - shows the format of a release.
+mod = "example-mod"
+version = "1.0.0"
+commit = "0000000000000000000000000000000000000000"
+
+[build]
+jdk = "temurin-25"
+gradle = "9.1"
+command = "./gradlew --no-daemon bitecheckJar"
+
+[compat]
+project_zomboid = ">=42.12"
+zombiebuddy = ">=1.0.0, <2.0.0"
+
+[result]
+# Filled in by CI after two identical builds.
+sha256 = ""
+built_at = ""
+
+[signatures]
+author = ""      # signs mod, version, commit and build recipe
+registry = ""    # added by CI after the double build succeeded
