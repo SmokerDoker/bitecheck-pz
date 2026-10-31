@@ -5,7 +5,7 @@ subprojects {
     apply(plugin = "java")
 
     group = "io.github.bitecheckpz"
-    version = "0.1.0-SNAPSHOT"
+    version = (findProperty("bitecheckVersion") as String?) ?: "0.1.0-SNAPSHOT"
 
     extensions.configure<JavaPluginExtension> {
         toolchain.languageVersion.set(JavaLanguageVersion.of(21))
@@ -13,6 +13,9 @@ subprojects {
 
     tasks.withType<JavaCompile>().configureEach {
         options.encoding = "UTF-8"
+        // Class files for Java 17+, so BiteCheck also runs on older Java runtimes
+        // (Project Zomboid's bundled one, or whatever Java a player has installed).
+        options.release.set(17)
         options.compilerArgs.addAll(listOf("-Xlint:all", "-Werror"))
     }
 

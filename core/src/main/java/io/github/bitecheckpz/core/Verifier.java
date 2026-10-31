@@ -56,7 +56,14 @@ public final class Verifier {
     }
 
     public Result verify(Path jar) throws IOException {
-        String sha = Hashing.sha256Hex(jar);
+        return verifyHash(Hashing.sha256Hex(jar));
+    }
+
+    /** Verifies a jar by its SHA-256 (lower-case hex). */
+    public Result verifyHash(String sha) throws IOException {
+        if (!Hashing.isSha256Hex(sha)) {
+            throw new IllegalArgumentException("not a SHA-256 hex digest: " + sha);
+        }
         List<String> messages = new ArrayList<>();
         try {
             var blocked = registry.blockReason(sha);

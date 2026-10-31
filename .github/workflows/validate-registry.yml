@@ -5,32 +5,53 @@ on:
     paths:
       - "registry/**"
       - "keys/**"
-  push:
-    branches: [main]
 
 permissions:
   contents: read
 
 jobs:
-  toml:
+  lint:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - name: Check out the pull request
+        uses: actions/checkout@v4
+        with:
+          path: pr
+          persist-credentials: false
+      - name: Check out the trusted tools from the base branch
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.base.sha }}
+          path: base
+          persist-credentials: false
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
-      - name: Check that every registry file is valid TOML
+      - name: Every registry file is valid TOML
+        working-directory: pr
         run: |
           python - <<'EOF'
           import pathlib, sys, tomllib
           errors = 0
-          for path in sorted(pathlib.Path("registry").rglob("*.toml")):
+          for path in sorted(pathlib.Path(".").glob("registry/**/*.toml")) + sorted(pathlib.Path(".").glob("keys/**/*.toml")):
               try:
-                  with path.open("rb") as f:
-                      tomllib.load(f)
-                  print(f"ok    {path}")
+                  tomllib.loads(path.read_text(encoding="utf-8"))
               except tomllib.TOMLDecodeError as e:
                   errors += 1
                   print(f"ERROR {path}: {e}")
           sys.exit(1 if errors else 0)
           EOF
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "21"
+      - name: Build bcz from the base branch
+        run: cd base && ./gradlew --no-daemon -q :cli:installDist
+      - name: Lint names, fields and signatures
+        run: |
+          bcz=base/cli/build/install/bcz/bin/bcz
+          if [ -f base/keys/registry.pub ]; then
+            $bcz lint --registry pr --registry-key base/keys/registry.pub
+          else
+            $bcz lint --registry pr
+          fi

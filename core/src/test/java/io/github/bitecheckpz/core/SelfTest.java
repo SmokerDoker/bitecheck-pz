@@ -97,6 +97,66 @@ public final class SelfTest {
             expect(f.verify().status(), Verifier.Status.UNVERIFIED);
         });
 
+        run("json: round trip keeps big numbers, order and unknown fields", SelfTest::jsonRoundTrip);
+        run("json: rejects broken input", SelfTest::jsonRejects);
+        run("scanner: clean class has no findings", () -> {
+            Scanner.Report r = Scanner.scan(jarOf("CleanMod"));
+            expect(r.findings().size(), 0);
+            expect(r.classCount(), 1);
+        });
+        run("scanner: process start is hard, URL and strings are soft", () -> {
+            Scanner.Report r = Scanner.scan(jarOf("ShadyMod"));
+            expect(r.hasHardFindings(), true);
+            expect(r.findings().stream().anyMatch(f -> f.rule().equals("process")), true);
+            expect(r.findings().stream().anyMatch(f -> f.rule().equals("network")), true);
+            expect(r.findings().stream().anyMatch(f -> f.rule().equals("strings")), true);
+        });
+        run("scanner: native library inside the jar is hard", () -> {
+            Path jar = Files.createTempFile("bcz-native", ".jar");
+            try (var zip = new java.util.zip.ZipOutputStream(Files.newOutputStream(jar))) {
+                zip.putNextEntry(new java.util.zip.ZipEntry("natives/evil.dll"));
+                zip.write(new byte[] {1, 2, 3});
+                zip.closeEntry();
+            }
+            expect(Scanner.scan(jar).hasHardFindings(), true);
+        });
+        run("index: generated index matches the verifier and round trips", () -> {
+            Fixture f = Fixture.create();
+            Files.writeString(f.dir.resolve("registry/blocklist.toml"), "[blocked]\n" + "ab".repeat(32) + " = \"bad\"\n");
+            String text = Index.generate(f.registry(), new Verifier(f.registry(), f.registryKey),
+                    java.time.Instant.parse("2026-11-01T10:00:00Z"), "abc");
+            Path file = f.dir.resolve("index.toml");
+            Files.writeString(file, text);
+            Index index = Index.parse(file);
+            expect(index.lookup(Hashing.sha256Hex(f.jar)).status(), Verifier.Status.VERIFIED);
+            expect(index.lookup("ab".repeat(32)).status(), Verifier.Status.BLOCKED);
+            expect(index.lookup("cd".repeat(32)).status(), Verifier.Status.UNVERIFIED);
+            expect(index.isStale(java.time.Instant.parse("2026-11-05T10:00:00Z")), false);
+            expect(index.isStale(java.time.Instant.parse("2026-11-09T10:00:00Z")), true);
+        });
+        run("index: flagged release is listed as flagged", () -> {
+            Fixture f = Fixture.create();
+            f.addFlag("open", "critical");
+            Path file = f.dir.resolve("index.toml");
+            Files.writeString(file, Index.generate(f.registry(), new Verifier(f.registry(), f.registryKey),
+                    java.time.Instant.now(), ""));
+            expect(Index.parse(file).lookup(Hashing.sha256Hex(f.jar)).status(), Verifier.Status.FLAGGED);
+        });
+        run("lint: valid registry has no problems", () -> {
+            Fixture f = Fixture.create();
+            expect(Lint.check(f.registry(), java.util.Optional.of(f.registryKey)), List.of());
+        });
+        run("lint: finds unsigned release, bad review and bad names", () -> {
+            Fixture f = Fixture.create();
+            Files.delete(Signatures.signaturePath(f.releaseFile));
+            Files.writeString(f.reviewFile("carol"), "\nverdict2 = \"x\"\n", java.nio.file.StandardOpenOption.APPEND);
+            Files.createDirectories(f.dir.resolve("registry/mods/Bad_Name"));
+            List<String> problems = Lint.check(f.registry(), java.util.Optional.of(f.registryKey));
+            expect(problems.stream().anyMatch(p -> p.contains("1.0.0.toml: author signature")), true);
+            expect(problems.stream().anyMatch(p -> p.contains("carol.toml: reviewer signature")), true);
+            expect(problems.stream().anyMatch(p -> p.contains("Bad_Name")), true);
+        });
+
         System.out.println();
         System.out.println(passed + " passed, " + failures.size() + " failed");
         if (!failures.isEmpty()) {
@@ -172,6 +232,51 @@ public final class SelfTest {
         deleteTree(dir);
     }
 
+    private static void jsonRoundTrip() throws Exception {
+        String input = """
+                {
+                  "formatVersion": 2,
+                  "mods": [
+                    {"id": "ZBetterModList", "workshop_id": 3709229404, "jar_hash": "c1",
+                     "decision": true, "time": "2026-04-01T12:34:56Z", "author_id": 76561198043849998,
+                     "future": {"nested": [1, 2.5, null, "x\\"y"]}}
+                  ],
+                  "zz_unknown": false
+                }""";
+        Object parsed = Json.parse(input);
+        String written = Json.write(parsed);
+        expect(Json.parse(written), parsed);
+        expect(written.contains("76561198043849998"), true);
+        expect(written.indexOf("formatVersion") < written.indexOf("zz_unknown"), true);
+    }
+
+    private static void jsonRejects() {
+        for (String bad : List.of("{", "[1,]x", "{\"a\" 1}", "tru", "\"open", "{}{}")) {
+            try {
+                Json.parse(bad);
+                throw new AssertionError("accepted: " + bad);
+            } catch (Json.JsonException expected) {
+                // ok
+            }
+        }
+    }
+
+    /** Packs one fixture class from the test classpath into a temporary jar. */
+    private static Path jarOf(String simpleName) throws IOException {
+        String entry = "io/github/bitecheckpz/core/fixtures/" + simpleName + ".class";
+        Path jar = Files.createTempFile("bcz-scan", ".jar");
+        try (var in = SelfTest.class.getResourceAsStream("/" + entry);
+                var zip = new java.util.zip.ZipOutputStream(Files.newOutputStream(jar))) {
+            if (in == null) {
+                throw new IOException("fixture not found: " + entry);
+            }
+            zip.putNextEntry(new java.util.zip.ZipEntry(entry));
+            in.transferTo(zip);
+            zip.closeEntry();
+        }
+        return jar;
+    }
+
     // ---- fixture: a small registry with one fully approved release ----
 
     private static final class Fixture {
@@ -197,8 +302,7 @@ public final class SelfTest {
             f.bob = f.key("keys/reviewers/bob.pub", "bob");
             f.carol = f.key("keys/reviewers/carol.pub", "carol");
             Files.writeString(f.dir.resolve("keys/trust.toml"),
-                    "[reviewers.bob]\nlevel = \"trusted\"\n[reviewers.carol]\nlevel = \"reviewer\"\n"
-                            + "[reviewers.alice]\nlevel = \"trusted\"\n");
+                    "[reviewers.bob]\nlevel = \"trusted\"\n[reviewers.carol]\nlevel = \"reviewer\"\n");
 
             f.modDir = f.dir.resolve("registry/mods/better-guns");
             Files.createDirectories(f.modDir.resolve("releases"));
@@ -215,6 +319,10 @@ public final class SelfTest {
                     mod = "better-guns"
                     version = "1.0.0"
                     commit = "0123456789abcdef0123456789abcdef01234567"
+                    [build]
+                    jdk = "temurin-21"
+                    command = "./gradlew jar"
+                    artifact = "build/libs/better-guns.jar"
                     """);
             Signatures.sign(f.releaseFile, f.author);
 

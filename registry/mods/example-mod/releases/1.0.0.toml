@@ -8,7 +8,8 @@ commit = "0000000000000000000000000000000000000000"
 [build]
 jdk = "temurin-25"
 gradle = "9.1"
-command = "./gradlew --no-daemon bitecheckJar"
+command = "./gradlew --no-daemon jar"
+artifact = "build/libs/example-mod.jar"  # path of the built jar, relative to the project
 
 [compat]
 project_zomboid = ">=42.12"

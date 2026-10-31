@@ -1,6 +1,9 @@
 package io.github.bitecheckpz.cli;
 
 import io.github.bitecheckpz.core.Hashing;
+import io.github.bitecheckpz.core.Index;
+import io.github.bitecheckpz.core.Lint;
+import io.github.bitecheckpz.core.Scanner;
 import io.github.bitecheckpz.core.Keys;
 import io.github.bitecheckpz.core.Records;
 import io.github.bitecheckpz.core.Registry;
@@ -15,6 +18,7 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.security.GeneralSecurityException;
 import java.security.KeyPair;
+import java.time.Instant;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
@@ -49,6 +53,14 @@ public final class Main {
               bcz verify <jar> [--registry <dir>] [--registry-key <public-key>]
                   Check a mod jar against the registry.
                   Exit codes: 0 verified, 10 unverified, 11 flagged, 12 blocked, 13 invalid.
+              bcz scan <jar> [--format text|markdown]
+                  Scan a mod jar for APIs reviewers must check. Exit code 14 on hard findings.
+              bcz lint [--registry <dir>] [--registry-key <public-key>]
+                  Check all registry files: names, fields, signatures.
+              bcz release-info <release.toml> [--registry <dir>]
+                  Print source, commit and build settings of a release as name=value lines (for CI).
+              bcz index [--registry <dir>] --registry-key <public-key> --out <file> [--commit <sha>]
+                  Generate the launcher index from the registry (sign it afterwards).
 
             Options:
               -h, --help     Show this help.
@@ -82,6 +94,10 @@ public final class Main {
                 case "build-record" -> buildRecord(parsed, out);
                 case "review" -> review(parsed, out);
                 case "verify" -> verify(parsed, out, err);
+                case "scan" -> scan(parsed, out);
+                case "lint" -> lint(parsed, out);
+                case "index" -> index(parsed, out);
+                case "release-info" -> releaseInfo(parsed, out);
                 default -> throw new UsageException("unknown command '" + parsed.command + "'");
             };
         } catch (UsageException e) {
@@ -187,6 +203,103 @@ public final class Main {
             case BLOCKED -> 12;
             case INVALID -> 13;
         };
+    }
+
+    private static int scan(Args a, PrintStream out) throws IOException, UsageException {
+        Path jar = Path.of(a.positional(0, "jar"));
+        Scanner.Report report = Scanner.scan(jar);
+        boolean md = a.option("format").orElse("text").equals("markdown");
+        long hard = report.count(Scanner.Severity.HARD);
+        long soft = report.count(Scanner.Severity.SOFT);
+        if (md) {
+            out.println("### BiteCheck scan: `" + jar.getFileName() + "`");
+            out.println();
+            out.println("SHA-256 `" + report.jarSha256() + "` - " + report.classCount() + " classes - **"
+                    + hard + " hard**, " + soft + " soft findings");
+            out.println();
+            if (!report.findings().isEmpty()) {
+                out.println("| Severity | Rule | Where | Detail |");
+                out.println("| --- | --- | --- | --- |");
+                for (Scanner.Finding f : report.findings()) {
+                    out.println("| " + f.severity() + " | " + f.rule() + " | `" + f.where() + "` | "
+                            + f.detail().replace("|", "\\|") + " |");
+                }
+            }
+            if (hard > 0) {
+                out.println();
+                out.println("Hard findings block this release. Soft findings must be explained in every review.");
+            }
+        } else {
+            out.println(jar + ": " + report.classCount() + " classes, " + hard + " hard, " + soft + " soft findings");
+            out.println("  sha256: " + report.jarSha256());
+            for (Scanner.Finding f : report.findings()) {
+                out.println("  " + f.severity() + "  " + f.rule() + "  " + f.where() + ": " + f.detail());
+            }
+        }
+        return report.hasHardFindings() ? 14 : OK;
+    }
+
+    private static int lint(Args a, PrintStream out) throws IOException, GeneralSecurityException {
+        Registry registry = new Registry(Path.of(a.option("registry").orElse(".")));
+        Optional<Keys.PublicKeyInfo> key = a.option("registry-key").isPresent()
+                ? Optional.of(Keys.readPublic(Path.of(a.option("registry-key").get())))
+                : registry.registryKey();
+        List<String> problems = Lint.check(registry, key);
+        if (key.isEmpty()) {
+            out.println("note: no registry key, build record signatures were not checked");
+        }
+        problems.forEach(p -> out.println("error: " + p));
+        out.println(problems.isEmpty() ? "Registry OK" : problems.size() + " problem(s)");
+        return problems.isEmpty() ? OK : ERROR;
+    }
+
+    private static int index(Args a, PrintStream out)
+            throws IOException, GeneralSecurityException, Toml.TomlException, UsageException {
+        Registry registry = new Registry(Path.of(a.option("registry").orElse(".")));
+        Keys.PublicKeyInfo key = Keys.readPublic(Path.of(a.requiredOption("registry-key")));
+        Path target = Path.of(a.requiredOption("out"));
+        String text = Index.generate(registry, new Verifier(registry, key), Instant.now(),
+                a.option("commit").orElse(""));
+        Files.writeString(target, text, StandardCharsets.UTF_8);
+        Index parsed = Index.parse(target);
+        long verified = parsed.entries().values().stream()
+                .filter(e -> e.status() == Verifier.Status.VERIFIED).count();
+        out.println("Wrote " + target + ": " + parsed.entries().size() + " entries, " + verified + " verified");
+        return OK;
+    }
+
+    private static int releaseInfo(Args a, PrintStream out) throws IOException, Toml.TomlException, UsageException {
+        Path releaseFile = Path.of(a.positional(0, "release.toml"));
+        Registry registry = new Registry(Path.of(a.option("registry").orElse(".")));
+        var release = Toml.parse(releaseFile);
+        String mod = Toml.string(release, "mod");
+        String version = Toml.string(release, "version");
+        Registry.requireName(mod, "mod");
+        Registry.requireVersion(version);
+        var modInfo = Toml.parse(registry.modDir(mod).resolve("mod.toml"));
+        var build = Toml.table(release, "build");
+        String jdk = String.valueOf(Toml.string(build, "jdk"));
+        if (!jdk.matches("(temurin|zulu|corretto|microsoft|liberica|oracle)-[0-9]{2}")) {
+            throw new IllegalArgumentException("[build] jdk must look like temurin-25");
+        }
+        String[] values = {
+            "mod", mod,
+            "version", version,
+            "source", Toml.string(modInfo, "source"),
+            "commit", Toml.string(release, "commit"),
+            "jdk_distribution", jdk.substring(0, jdk.indexOf('-')),
+            "jdk_version", jdk.substring(jdk.indexOf('-') + 1),
+            "command", Toml.string(build, "command"),
+            "artifact", Toml.string(build, "artifact"),
+        };
+        for (int i = 0; i < values.length; i += 2) {
+            String value = values[i + 1];
+            if (value == null || value.isBlank() || value.contains("\n") || value.contains("\r")) {
+                throw new IllegalArgumentException("release field " + values[i] + " is missing or invalid");
+            }
+            out.println(values[i] + "=" + value);
+        }
+        return OK;
     }
 
     // ---- argument parsing ----

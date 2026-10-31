@@ -1,0 +1,94 @@
+BiteCheck - Test-Anleitung (erster gemeinsamer Test)
+=====================================================
+
+Dieses Test-Kit enthält:
+  BiteCheck\        den Launcher (Windows, macOS, Linux)
+  TestMods\         drei harmlose Test-Mods. Jede schreibt beim Laden nur eine Zeile ins Log.
+                      BiteCheck Test: Verified    -> im Test-Index als GEPRÜFT eingetragen
+                      BiteCheck Test: Flagged     -> im Test-Index als MARKIERT eingetragen
+                      BiteCheck Test: Unverified  -> nicht im Test-Index
+  test-registry\    ein eigener, signierter Test-Index (statt des echten Registers)
+
+Der Test-Index ist bis __VALID_UNTIL__ gültig. Danach behandelt BiteCheck auch
+"Verified" als ungeprüft, das ist so gewollt. Ich kann jederzeit ein neues Kit bauen.
+
+Der Test benutzt einen eigenen BiteCheck-Ordner (test-registry). Deine normalen
+BiteCheck-Einstellungen bleiben unberührt. BiteCheck schreibt aber wie im echten
+Betrieb in die Freigabe-Datei von ZombieBuddy:
+  %USERPROFILE%\.zombie_buddy\mod_approvals.json
+Vorher legt es einmalig eine Sicherung an: mod_approvals.json.bitecheck-backup
+
+
+Voraussetzungen
+---------------
+- Project Zomboid Build 42 über Steam
+- ZombieBuddy ist installiert und funktioniert (Java-Mods laden bereits)
+
+
+Ablauf
+------
+1. Kit entpacken, z. B. auf den Desktop.
+
+2. Die drei Ordner aus TestMods\ nach
+     %USERPROFILE%\Zomboid\mods\
+   kopieren (Explorer-Adressleiste: %USERPROFILE%\Zomboid\mods eingeben).
+
+3. Project Zomboid einmal normal über Steam starten, im Hauptmenü unter "Mods"
+   die drei "BiteCheck Test"-Mods (und ZombieBuddy) aktivieren, dann das Spiel
+   beenden.
+   Falls ZombieBuddy dabei schon nach den Test-Mods fragt: "Nein" wählen und die
+   Entscheidung NICHT dauerhaft speichern, damit der Test sauber startet.
+
+4. Start-Test-Windows.bat doppelklicken.
+   (Falls Windows SmartScreen warnt: "Weitere Informationen" -> "Trotzdem ausführen".)
+
+   Erwartet im BiteCheck-Fenster:
+     BiteCheck Test: Verified     ✔ verified     -> "loads"
+     BiteCheck Test: Flagged      ⚠ flagged      -> "blocked"
+     BiteCheck Test: Unverified   ? unverified   -> "ZombieBuddy asks"
+   plus deine anderen Java-Mods, falls du welche hast (die stehen als "unverified",
+   weil sie nicht im Test-Index sind; an ihren bisherigen Freigaben ändert sich nichts).
+   Unten sollte der Pfad zu Project Zomboid stehen ("Game: ...").
+
+5. "Start Project Zomboid" klicken. BiteCheck schließt sich, Steam startet das Spiel.
+
+   Erwartet im Spiel (beim Laden der Mods):
+     - ZombieBuddy fragt NUR nach "BiteCheck Test: Unverified". Bitte zulassen.
+     - KEINE Frage für "Verified" (lädt einfach) und für "Flagged" (wird blockiert).
+
+6. Ins Log schauen: %USERPROFILE%\Zomboid\console.txt öffnen und nach
+     [BiteCheck test]
+   suchen. Erwartet:
+     ... The verified test mod was loaded by ZombieBuddy.
+     ... The unverified test mod was loaded by ZombieBuddy.
+   aber KEINE Zeile für "flagged".
+
+7. Optional: markierte Mod trotzdem erlauben.
+   Spiel beenden, Start-Test-Windows.bat erneut starten, die Zeile
+   "BiteCheck Test: Flagged" anklicken, "Allow flagged mod..." -> bestätigen ->
+   ALLOW eintippen -> "Start Project Zomboid". Jetzt sollte im Log auch die
+   Zeile für "flagged" erscheinen.
+
+
+Was ich von dir zurück brauche
+------------------------------
+- Screenshot vom BiteCheck-Fenster (Schritt 4)
+- Hat ZombieBuddy nur nach "Unverified" gefragt? (Screenshot vom Dialog, falls möglich)
+- Die "[BiteCheck test]"-Zeilen aus console.txt
+- Bei Problemen: Fehlermeldungen und die Datei
+  %USERPROFILE%\.zombie_buddy\mod_approvals.json
+
+
+Aufräumen nach dem Test
+-----------------------
+- Die drei BiteCheckTest-Ordner aus %USERPROFILE%\Zomboid\mods\ löschen.
+- Optional die alte Freigabe-Datei zurückholen: mod_approvals.json löschen und
+  mod_approvals.json.bitecheck-backup in mod_approvals.json umbenennen.
+
+
+macOS / Linux
+-------------
+Statt Start-Test-Windows.bat: Start-Test-macOS.command (Rechtsklick -> Öffnen)
+bzw. ./start-test-linux.sh. Die Mod-Ordner kommen nach ~/Zomboid/mods/, das Log
+liegt unter ~/Zomboid/console.txt, die ZombieBuddy-Datei unter
+~/.zombie_buddy/mod_approvals.json.

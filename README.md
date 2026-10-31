@@ -18,10 +18,15 @@ BiteCheck adds a verification step before a Java mod is loaded:
 
 ## How it works for players
 
+BiteCheck works together with [ZombieBuddy](https://github.com/zed-0xff/ZombieBuddy), which loads Java mods. Start the game with the BiteCheck launcher (`BiteCheck.bat`, `BiteCheck.command` or `bitecheck.sh`); it checks every installed Java mod against the signed registry index and then starts Project Zomboid through Steam:
+
 - **Verified mods** load without any prompt.
-- **Unverified mods** still work, just like with ZombieBuddy — but BiteCheck shows a warning for each one and asks you to confirm before loading it. Your choice is remembered for that exact file only.
+- **Unverified mods** still work, just like with ZombieBuddy: ZombieBuddy warns you in game and asks before loading each one. Your choice is remembered for that exact file only.
+- **Flagged mods** are not loaded unless you allow them anyway (double confirmation).
 - **Mods with confirmed malware** are on a block list and never load.
 - **Lua mods** are loaded by the game itself and are not affected by BiteCheck at all.
+
+Under the hood BiteCheck writes allow/deny decisions per jar hash into ZombieBuddy's `~/.zombie_buddy/mod_approvals.json` and never touches anything else. If you start the game from Steam directly, ZombieBuddy's own questions still protect you. The launcher runs on Windows, macOS and Linux with the Java runtime that comes with Project Zomboid; no separate Java install is needed.
 
 ## How it works for modders
 
@@ -38,17 +43,19 @@ Your mod is never blocked while it waits for review: players can load it as an u
 🚧 **Early development.** Not ready for players yet.
 
 - [x] Registry format and repository structure
-- [x] `bcz` CLI: keys, signatures, build records, reviews, verification
-- [ ] `bcz login` / `bcz submit` (GitHub integration)
-- [ ] CI pipeline: double build, hash comparison, scanner, registry signature
-- [ ] Launcher verification layer on top of [ZombieBuddy](https://github.com/zed-0xff/ZombieBuddy)
-- [ ] Mod template and Gradle plugin
+- [x] `bcz` CLI: keys, signatures, build records, reviews, verification, scanner, lint, index
+- [x] Launcher for Windows, macOS and Linux on top of [ZombieBuddy](https://github.com/zed-0xff/ZombieBuddy)
+- [x] CI pipeline: double build, hash comparison, scanner, registry signature, signed index
+- [x] Test kit with three harmless test mods (`scripts/make-test-kit.sh`)
+- [ ] First test with real players
+- [ ] Registry key set up ([docs/SETUP-REGISTRY.md](docs/SETUP-REGISTRY.md)) and first real mods
+- [ ] `bcz login` / `bcz submit` (GitHub integration), mod template and Gradle plugin
 - [ ] Key revocation, update diffs, reviewer reputation tooling
 
 ## The `bcz` command line tool
 
 ```sh
-./gradlew :cli:installDist                 # needs Java 21+
+./gradlew :cli:installDist                 # builds with JDK 21, runs on Java 17+
 alias bcz=cli/build/install/bcz/bin/bcz     # or bcz.bat on Windows
 
 bcz keygen alice                            # Ed25519 key pair; private key in ~/.bitecheck/keys/
@@ -56,6 +63,9 @@ bcz sign registry/mods/my-mod/releases/1.0.0.toml --key ~/.bitecheck/keys/alice.
 bcz build-record <release.toml> <jar> --builder runner-a --builder runner-b   # CI
 bcz review <release.toml> <jar> --reviewer bob --verdict approve              # reviewers
 bcz verify my-mod.jar --registry . --registry-key keys/registry.pub
+bcz scan my-mod.jar                         # APIs reviewers must check; exit 14 on hard findings
+bcz lint                                    # check all registry files and signatures
+bcz index --registry-key keys/registry.pub --out index.toml   # CI: launcher index
 ```
 
 `bcz verify` prints `VERIFIED`, `UNVERIFIED`, `FLAGGED`, `BLOCKED` or `INVALID` with the reasons, and exits with 0, 10, 11, 12 or 13. See [registry/README.md](registry/README.md) for the exact rules.
@@ -65,12 +75,26 @@ BiteCheck has **no third-party dependencies**: everything you have to trust is i
 ## Repository layout
 
 ```
-core/            Verification library (hashing, Ed25519 signatures, registry, verifier)
+core/            Verification library (signatures, registry, verifier, scanner, index)
 cli/             The bcz command line tool
+launcher/        The player launcher (window + command line) and its start scripts
+examples/        Harmless test mods
+scripts/         make-test-kit.sh builds a self-contained test kit
+docs/            Setup and test guides
 registry/        Mod entries, releases, reviews and flags (see registry/README.md)
 keys/            Public keys of the registry, authors and reviewers
-.github/         CI workflows
+.github/         CI: build, mod submissions, registry signing and index publishing
 ```
+
+### CI workflows
+
+| Workflow | When | What |
+| --- | --- | --- |
+| `build.yml` | every push / PR | tests, reproducible jars, launcher download as artifact |
+| `validate-registry.yml` | PRs touching the registry | TOML check, `bcz lint` with tools from the base branch |
+| `submission.yml` | PRs adding a release | builds the mod twice on different runners, compares hashes, scans the jar |
+| `registry.yml` | merges to main, daily | rebuilds new releases, signs build records, publishes the signed index |
+| `release.yml` | tags `v*` | GitHub release with launcher and bcz downloads |
 
 Run the tests with `./gradlew check`.
 

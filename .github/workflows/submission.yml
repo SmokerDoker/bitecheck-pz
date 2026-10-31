@@ -1,0 +1,104 @@
+# Runs on pull requests that add or change a release: builds the mod twice on independent
+# runners, compares the hashes and scans the jar. Results go to the run summary; the jar is
+# uploaded so reviewers can review exactly what was built.
+name: Mod submission
+
+on:
+  pull_request:
+    paths:
+      - "registry/mods/*/releases/*.toml"
+
+permissions:
+  contents: read
+
+jobs:
+  detect:
+    runs-on: ubuntu-latest
+    outputs:
+      releases: ${{ steps.find.outputs.releases }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - id: find
+        env:
+          BASE: ${{ github.event.pull_request.base.sha }}
+        run: |
+          git diff --name-only --diff-filter=AM "$BASE"...HEAD \
+            | grep -E '^registry/mods/[a-z0-9][a-z0-9-]*/releases/[0-9A-Za-z][0-9A-Za-z.+_-]*\.toml$' \
+            | grep -v '\.build\.toml$' > releases.txt || true
+          python3 .github/scripts/matrix.py releases.txt >> "$GITHUB_OUTPUT"
+
+  build-a:
+    needs: detect
+    if: needs.detect.outputs.releases != '[]'
+    strategy:
+      matrix:
+        include: ${{ fromJSON(needs.detect.outputs.releases) }}
+    uses: ./.github/workflows/build-mod.yml
+    with:
+      release: ${{ matrix.release }}
+      key: ${{ matrix.key }}
+      builder: a
+      runner: ubuntu-24.04
+      registry_ref: ${{ github.event.pull_request.head.sha }}
+      tools_ref: ${{ github.event.pull_request.base.sha }}
+
+  build-b:
+    needs: detect
+    if: needs.detect.outputs.releases != '[]'
+    strategy:
+      matrix:
+        include: ${{ fromJSON(needs.detect.outputs.releases) }}
+    uses: ./.github/workflows/build-mod.yml
+    with:
+      release: ${{ matrix.release }}
+      key: ${{ matrix.key }}
+      builder: b
+      runner: ubuntu-22.04
+      registry_ref: ${{ github.event.pull_request.head.sha }}
+      tools_ref: ${{ github.event.pull_request.base.sha }}
+
+  compare:
+    needs: [detect, build-a, build-b]
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include: ${{ fromJSON(needs.detect.outputs.releases) }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.base.sha }}
+          persist-credentials: false
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "21"
+      - name: Build bcz
+        run: ./gradlew --no-daemon -q :cli:installDist
+      - uses: actions/download-artifact@v4
+        with:
+          name: build-a-${{ matrix.key }}
+          path: a
+      - uses: actions/download-artifact@v4
+        with:
+          name: build-b-${{ matrix.key }}
+          path: b
+      - name: Compare the two builds
+        run: |
+          echo "### Reproducible build: \`${{ matrix.key }}\`" >> "$GITHUB_STEP_SUMMARY"
+          if [ "$(cat a/sha256.txt)" != "$(cat b/sha256.txt)" ]; then
+            echo "❌ The two builds differ: \`$(cat a/sha256.txt)\` vs \`$(cat b/sha256.txt)\`. See CONTRIBUTING.md for reproducible builds." >> "$GITHUB_STEP_SUMMARY"
+            exit 1
+          fi
+          echo "✅ Both builds produced \`$(cat a/sha256.txt)\`" >> "$GITHUB_STEP_SUMMARY"
+      - name: Scan the jar
+        run: cli/build/install/bcz/bin/bcz scan a/mod.jar --format markdown >> "$GITHUB_STEP_SUMMARY"
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: mod-${{ matrix.key }}
+          path: a/mod.jar
+          retention-days: 90

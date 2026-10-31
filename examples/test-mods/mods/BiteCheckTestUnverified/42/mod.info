@@ -1,0 +1,6 @@
+name=BiteCheck Test: Unverified
+id=BiteCheckTestUnverified
+description=Harmless test mod for BiteCheck. Not in the BiteCheck test index: ZombieBuddy should ask you before loading it. It only prints one line to the log.
+require=\ZombieBuddy
+javaJarFile=media/java/BiteCheckTestUnverified.jar
+javaPkgName=io.github.bitecheckpz.testmods.unverified

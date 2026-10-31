@@ -1,0 +1,96 @@
+# Builds one mod release from its public source. Used twice per release (two independent
+# runners) by submission.yml and registry.yml. Has no secrets and read-only access.
+name: Build mod (reusable)
+
+on:
+  workflow_call:
+    inputs:
+      release:
+        description: Path of the release file, e.g. registry/mods/my-mod/releases/1.0.0.toml
+        type: string
+        required: true
+      key:
+        description: Short unique name for artifacts
+        type: string
+        required: true
+      builder:
+        description: Builder name (a or b)
+        type: string
+        required: true
+      runner:
+        type: string
+        required: true
+      registry_ref:
+        description: Commit of the registry that contains the release
+        type: string
+        required: true
+      tools_ref:
+        description: Trusted commit to build the bcz tool from
+        type: string
+        required: true
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ${{ inputs.runner }}
+    timeout-minutes: 30
+    steps:
+      - name: Check out the trusted bcz tool
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.tools_ref }}
+          path: tools
+          persist-credentials: false
+      - name: Check out the registry
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.registry_ref }}
+          path: registry
+          persist-credentials: false
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "21"
+      - name: Build bcz
+        run: cd tools && ./gradlew --no-daemon -q :cli:installDist
+      - name: Read the release
+        id: info
+        env:
+          RELEASE: ${{ inputs.release }}
+        run: tools/cli/build/install/bcz/bin/bcz release-info "registry/$RELEASE" --registry registry >> "$GITHUB_OUTPUT"
+      - name: Set up the mod's JDK
+        uses: actions/setup-java@v4
+        with:
+          distribution: ${{ steps.info.outputs.jdk_distribution }}
+          java-version: ${{ steps.info.outputs.jdk_version }}
+      - name: Fetch the source at the exact commit
+        env:
+          SOURCE: ${{ steps.info.outputs.source }}
+          COMMIT: ${{ steps.info.outputs.commit }}
+        run: |
+          git init -q src
+          git -C src remote add origin "$SOURCE"
+          git -C src fetch -q --depth 1 origin "$COMMIT"
+          git -C src checkout -q FETCH_HEAD
+          test "$(git -C src rev-parse HEAD)" = "$COMMIT"
+      - name: Build the mod
+        working-directory: src
+        env:
+          BUILD_COMMAND: ${{ steps.info.outputs.command }}
+        run: bash -c "$BUILD_COMMAND"
+      - name: Hash the jar
+        env:
+          ARTIFACT: ${{ steps.info.outputs.artifact }}
+        run: |
+          test -f "src/$ARTIFACT" || { echo "::error::artifact $ARTIFACT was not built"; exit 1; }
+          mkdir out
+          cp "src/$ARTIFACT" out/mod.jar
+          sha256sum out/mod.jar | cut -d' ' -f1 > out/sha256.txt
+          echo "SHA-256 ($RUNNER_OS, ${{ inputs.runner }}): $(cat out/sha256.txt)" >> "$GITHUB_STEP_SUMMARY"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: build-${{ inputs.builder }}-${{ inputs.key }}
+          path: out/
+          retention-days: 30

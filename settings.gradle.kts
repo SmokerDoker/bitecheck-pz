@@ -1,3 +1,3 @@
 rootProject.name = "bitecheck"
 
-include("core", "cli")
+include("core", "cli", "launcher", "examples:test-mods")
