@@ -41,7 +41,7 @@ final class LauncherWindow {
     private final ModTableModel model = new ModTableModel();
     private final JTable table = new JTable(model);
     private final JTextArea notes = new JTextArea(4, 60);
-    private final JButton allowFlagged = new JButton("Allow flagged mod…");
+    private final JButton allowFlagged = new JButton("Allow anyway…");
     private final JButton refresh = new JButton("Check again");
     private final JButton applyOnly = new JButton("Apply only");
     private final JButton start = new JButton("Start Project Zomboid");
@@ -72,8 +72,9 @@ final class LauncherWindow {
         title.setFont(title.getFont().deriveFont(Font.BOLD, title.getFont().getSize2D() + 4f));
         header.add(title, BorderLayout.NORTH);
         header.add(summary, BorderLayout.CENTER);
-        JLabel legend = new JLabel("<html>Verified mods load without a question. Unverified mods: ZombieBuddy warns you "
-                + "in game and asks before loading each one. Flagged and blocked mods are not loaded.</html>");
+        JLabel legend = new JLabel("<html><body style='width: 620px'>Verified mods load without a question. Unverified mods are scanned locally; "
+                + "ZombieBuddy warns you in game and asks before loading each one. Suspicious, flagged and blocked "
+                + "mods are not loaded. The local scan is a quick check, not a review.</html>");
         legend.setForeground(Color.DARK_GRAY);
         header.add(legend, BorderLayout.SOUTH);
         content.add(header, BorderLayout.NORTH);
@@ -114,6 +115,7 @@ final class LauncherWindow {
 
         frame.setContentPane(content);
         frame.pack();
+        frame.setSize(Math.min(frame.getWidth(), 960), frame.getHeight());
         frame.setLocationRelativeTo(null);
         frame.setVisible(true);
         check();
@@ -131,7 +133,7 @@ final class LauncherWindow {
 
     private void updateButtons() {
         Planner.Row row = selectedRow();
-        allowFlagged.setEnabled(row != null && row.status() == Verifier.Status.FLAGGED && !row.allowedAnyway());
+        allowFlagged.setEnabled(row != null && row.needsPermission() && !row.allowedAnyway());
     }
 
     private Planner.Row selectedRow() {
@@ -168,14 +170,15 @@ final class LauncherWindow {
         session = s;
         model.setRows(s.rows);
         long verified = count(s.rows, Verifier.Status.VERIFIED);
-        long unverified = count(s.rows, Verifier.Status.UNVERIFIED);
+        long suspicious = s.rows.stream().filter(Planner.Row::suspicious).count();
+        long unverified = count(s.rows, Verifier.Status.UNVERIFIED) - suspicious;
         long flagged = count(s.rows, Verifier.Status.FLAGGED);
         long blocked = count(s.rows, Verifier.Status.BLOCKED);
         String indexText = s.index.index()
                 .map(i -> "registry index from " + i.generatedAt().toString().replace('T', ' ').replace("Z", " UTC"))
                 .orElse("registry index not available");
         summary.setText(s.mods.size() + " Java mod(s): " + verified + " verified, " + unverified + " unverified, "
-                + flagged + " flagged, " + blocked + " blocked - " + indexText);
+                + suspicious + " suspicious, " + flagged + " flagged, " + blocked + " blocked - " + indexText);
         StringBuilder text = new StringBuilder();
         text.append("Game: ").append(s.platform.gameDir().map(Path::toString).orElse("not found")).append('\n');
         text.append("ZombieBuddy approvals: ").append(s.approvals.file()).append('\n');
@@ -193,25 +196,29 @@ final class LauncherWindow {
 
     private void allowSelectedFlagged() {
         Planner.Row row = selectedRow();
-        if (row == null || row.status() != Verifier.Status.FLAGGED) {
+        if (row == null || !row.needsPermission()) {
             return;
         }
+        String why = row.status() == Verifier.Status.FLAGGED
+                ? "has been <b>flagged</b> as possibly harmful by the BiteCheck registry:"
+                : "is not reviewed and BiteCheck's <b>local scan</b> found risky code:";
         int first = JOptionPane.showConfirmDialog(frame,
-                "<html><b>" + escape(row.mod().name()) + "</b> has been flagged as possibly harmful:<br><br>"
+                "<html><b>" + escape(row.mod().name()) + "</b> " + why + "<br><br>"
                         + escape(row.info()) + "<br><br>Java mods can access your whole computer.<br>"
+                        + "Only allow it if you trust the author and know why the mod needs this.<br>"
                         + "Do you really want to allow this mod?</html>",
-                "Flagged mod", JOptionPane.YES_NO_OPTION, JOptionPane.WARNING_MESSAGE);
+                "Risky mod", JOptionPane.YES_NO_OPTION, JOptionPane.WARNING_MESSAGE);
         if (first != JOptionPane.YES_OPTION) {
             return;
         }
         String typed = JOptionPane.showInputDialog(frame,
                 "<html>To confirm, type <b>ALLOW</b>. You can undo this by deleting<br>" + escape(
                         dir.resolve("state.toml").toString()) + "</html>",
-                "Confirm flagged mod", JOptionPane.WARNING_MESSAGE);
+                "Confirm", JOptionPane.WARNING_MESSAGE);
         if (!"ALLOW".equals(typed == null ? null : typed.strip())) {
             return;
         }
-        session.state.allowedFlagged().put(row.jar().sha256(), row.mod().id() + " - allowed by the player");
+        session.state.allowedAnyway().put(row.jar().sha256(), row.mod().id() + " - allowed by the player");
         show(session.replan());
     }
 
@@ -288,8 +295,8 @@ final class LauncherWindow {
             return switch (columnIndex) {
                 case 0 -> r.mod().name() + (r.mod().workshopId() != null ? "  (" + r.mod().workshopId() + ")" : "");
                 case 1 -> r.jar().path().getFileName().toString();
-                case 2 -> r.status();
-                case 3 -> r.allowedAnyway() ? "allowed by you despite flag: " + r.info() : r.info();
+                case 2 -> r;
+                case 3 -> r.allowedAnyway() ? "allowed by you: " + r.info() : r.info();
                 default -> onStart(r);
             };
         }
@@ -299,7 +306,8 @@ final class LauncherWindow {
                 case VERIFIED -> "loads";
                 case BLOCKED -> "blocked";
                 case FLAGGED -> r.allowedAnyway() ? "loads (your choice)" : "blocked";
-                default -> Boolean.TRUE.equals(r.currentDecision()) && r.action() != Planner.Action.ASK_IN_GAME
+                default -> r.suspicious() ? (r.allowedAnyway() ? "loads (your choice)" : "blocked")
+                        : Boolean.TRUE.equals(r.currentDecision()) && r.action() != Planner.Action.ASK_IN_GAME
                         ? "loads (approved before)"
                         : Boolean.FALSE.equals(r.currentDecision()) ? "blocked (your choice)" : "ZombieBuddy asks";
             };
@@ -313,8 +321,9 @@ final class LauncherWindow {
         public Component getTableCellRendererComponent(JTable table, Object value, boolean isSelected,
                 boolean hasFocus, int row, int column) {
             Component c = super.getTableCellRendererComponent(table, value, isSelected, hasFocus, row, column);
-            if (value instanceof Verifier.Status status) {
-                setText(switch (status) {
+            if (value instanceof Planner.Row r) {
+                Verifier.Status status = r.status();
+                setText(r.suspicious() ? "⚠ suspicious" : switch (status) {
                     case VERIFIED -> "✔ verified";
                     case UNVERIFIED -> "? unverified";
                     case FLAGGED -> "⚠ flagged";
@@ -322,7 +331,7 @@ final class LauncherWindow {
                     case INVALID -> "✖ invalid";
                 });
                 if (!isSelected) {
-                    c.setForeground(switch (status) {
+                    c.setForeground(r.suspicious() ? RED : switch (status) {
                         case VERIFIED -> GREEN;
                         case UNVERIFIED -> AMBER;
                         case FLAGGED -> RED;

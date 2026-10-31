@@ -88,6 +88,12 @@ EOF
 for kind in Verified Flagged Unverified; do
     "$BCZ" scan "$MODS/BiteCheckTest$kind/42/media/java/BiteCheckTest$kind.jar" >/dev/null
 done
+# The suspicious test mod must be caught by the scanner (exit code 14 = hard findings).
+set +e
+"$BCZ" scan "$MODS/BiteCheckTestSuspicious/42/media/java/BiteCheckTestSuspicious.jar" >/dev/null
+code=$?
+set -e
+[ "$code" = 14 ] || { echo "expected the scanner to catch the suspicious test mod (exit $code)" >&2; exit 1; }
 
 # ---- kit ----
 KIT="$WORK/BiteCheck-TestKit"

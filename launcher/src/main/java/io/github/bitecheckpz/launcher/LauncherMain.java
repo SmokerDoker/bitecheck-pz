@@ -18,7 +18,7 @@ import java.util.List;
  * BiteCheck --status        print the status of all installed Java mods
  * BiteCheck --sync          apply the decisions without starting the game
  * BiteCheck --launch        apply the decisions and start Project Zomboid through Steam
- * BiteCheck --allow-flagged &lt;sha256&gt; --i-understand-the-risk
+ * BiteCheck --allow &lt;sha256&gt; --i-understand-the-risk   (a flagged or suspicious mod)
  * BiteCheck --dir &lt;folder&gt;  use another BiteCheck folder instead of ~/.bitecheck
  * </pre>
  */
@@ -52,7 +52,7 @@ public final class LauncherMain {
         try {
             switch (command) {
                 case "--help", "-h" -> {
-                    out.println("Usage: BiteCheck [--status | --sync | --launch | --allow-flagged <sha256> "
+                    out.println("Usage: BiteCheck [--status | --sync | --launch | --allow <sha256> "
                             + "--i-understand-the-risk] [--dir <folder>]");
                     return 0;
                 }
@@ -83,9 +83,9 @@ public final class LauncherMain {
                     }
                     return 0;
                 }
-                case "--allow-flagged" -> {
+                case "--allow", "--allow-flagged" -> {
                     if (rest.size() < 3 || !rest.get(2).equals("--i-understand-the-risk")) {
-                        err.println("Usage: BiteCheck --allow-flagged <sha256> --i-understand-the-risk");
+                        err.println("Usage: BiteCheck --allow <sha256> --i-understand-the-risk");
                         return 2;
                     }
                     String sha = rest.get(1);
@@ -94,15 +94,15 @@ public final class LauncherMain {
                         return 2;
                     }
                     Session session = Session.run(dir);
-                    boolean flagged = session.rows.stream().anyMatch(r -> r.jar().sha256().equals(sha)
-                            && r.status() == Verifier.Status.FLAGGED);
-                    if (!flagged) {
-                        err.println("No installed flagged mod has this hash.");
+                    boolean blockedByBiteCheck = session.rows.stream()
+                            .anyMatch(r -> r.jar().sha256().equals(sha) && r.needsPermission());
+                    if (!blockedByBiteCheck) {
+                        err.println("No installed flagged or suspicious mod has this hash.");
                         return 1;
                     }
-                    session.state.allowedFlagged().put(sha, "allowed by the player");
+                    session.state.allowedAnyway().put(sha, "allowed by the player");
                     session.replan().apply();
-                    out.println("Allowed. ZombieBuddy will load this flagged mod.");
+                    out.println("Allowed. ZombieBuddy will load this mod.");
                     return 0;
                 }
                 default -> {
@@ -126,7 +126,7 @@ public final class LauncherMain {
                 () -> out.println("Index:       not available"));
         session.notes.forEach(n -> out.println("note: " + n));
         for (Planner.Row r : session.rows) {
-            out.printf("%-10s %-24s %-28s %s -> %s%n", r.status(), r.mod().id(),
+            out.printf("%-10s %-24s %-28s %s -> %s%n", r.suspicious() ? "SUSPICIOUS" : r.status(), r.mod().id(),
                     r.jar().path().getFileName(), r.info(), describe(r.action()));
         }
         return 0;

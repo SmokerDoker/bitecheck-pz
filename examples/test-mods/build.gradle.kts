@@ -1,8 +1,8 @@
 // Three harmless test mods for trying BiteCheck with Project Zomboid and ZombieBuddy:
-// one verified, one flagged and one unverified (see the test index made by scripts/make-test-kit.sh).
+// verified, flagged, unverified, and one whose code the local scan finds suspicious (see the test index made by scripts/make-test-kit.sh).
 // ./gradlew :examples:test-mods:testModsZip
 
-val kinds = listOf("Verified", "Flagged", "Unverified")
+val kinds = listOf("Verified", "Flagged", "Unverified", "Suspicious")
 
 val sets = the<SourceSetContainer>()
 kinds.forEach { sets.create(it.lowercase()) }

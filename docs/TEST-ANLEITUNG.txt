@@ -3,10 +3,13 @@ BiteCheck - Test-Anleitung (erster gemeinsamer Test)
 
 Dieses Test-Kit enthält:
   BiteCheck\        den Launcher (Windows, macOS, Linux)
-  TestMods\         drei harmlose Test-Mods. Jede schreibt beim Laden nur eine Zeile ins Log.
+  TestMods\         vier harmlose Test-Mods. Jede schreibt beim Laden nur eine Zeile ins Log.
                       BiteCheck Test: Verified    -> im Test-Index als GEPRÜFT eingetragen
                       BiteCheck Test: Flagged     -> im Test-Index als MARKIERT eingetragen
-                      BiteCheck Test: Unverified  -> nicht im Test-Index
+                      BiteCheck Test: Unverified  -> nicht im Test-Index, Code unauffällig
+                      BiteCheck Test: Suspicious  -> nicht im Test-Index, der Code erwähnt einen
+                                                     Programmstart (wird nie ausgeführt), die
+                                                     lokale Prüfung schlägt deshalb an
   test-registry\    ein eigener, signierter Test-Index (statt des echten Registers)
 
 Der Test-Index ist bis __VALID_UNTIL__ gültig. Danach behandelt BiteCheck auch
@@ -29,12 +32,12 @@ Ablauf
 ------
 1. Kit entpacken, z. B. auf den Desktop.
 
-2. Die drei Ordner aus TestMods\ nach
+2. Die vier Ordner aus TestMods\ nach
      %USERPROFILE%\Zomboid\mods\
    kopieren (Explorer-Adressleiste: %USERPROFILE%\Zomboid\mods eingeben).
 
 3. Project Zomboid einmal normal über Steam starten, im Hauptmenü unter "Mods"
-   die drei "BiteCheck Test"-Mods (und ZombieBuddy) aktivieren, dann das Spiel
+   die vier "BiteCheck Test"-Mods (und ZombieBuddy) aktivieren, dann das Spiel
    beenden.
    Falls ZombieBuddy dabei schon nach den Test-Mods fragt: "Nein" wählen und die
    Entscheidung NICHT dauerhaft speichern, damit der Test sauber startet.
@@ -46,6 +49,9 @@ Ablauf
      BiteCheck Test: Verified     ✔ verified     -> "loads"
      BiteCheck Test: Flagged      ⚠ flagged      -> "blocked"
      BiteCheck Test: Unverified   ? unverified   -> "ZombieBuddy asks"
+                                                  (Details: "local scan: no findings")
+     BiteCheck Test: Suspicious   ⚠ suspicious   -> "blocked"
+                                                  (Details: "local scan found: process")
    plus deine anderen Java-Mods, falls du welche hast (die stehen als "unverified",
    weil sie nicht im Test-Index sind; an ihren bisherigen Freigaben ändert sich nichts).
    Unten sollte der Pfad zu Project Zomboid stehen ("Game: ...").
@@ -54,20 +60,21 @@ Ablauf
 
    Erwartet im Spiel (beim Laden der Mods):
      - ZombieBuddy fragt NUR nach "BiteCheck Test: Unverified". Bitte zulassen.
-     - KEINE Frage für "Verified" (lädt einfach) und für "Flagged" (wird blockiert).
+     - KEINE Frage für "Verified" (lädt einfach), "Flagged" und "Suspicious"
+       (beide werden blockiert).
 
 6. Ins Log schauen: %USERPROFILE%\Zomboid\console.txt öffnen und nach
      [BiteCheck test]
    suchen. Erwartet:
      ... The verified test mod was loaded by ZombieBuddy.
      ... The unverified test mod was loaded by ZombieBuddy.
-   aber KEINE Zeile für "flagged".
+   aber KEINE Zeile für "flagged" und "suspicious".
 
-7. Optional: markierte Mod trotzdem erlauben.
+7. Optional: markierte oder verdächtige Mod trotzdem erlauben.
    Spiel beenden, Start-Test-Windows.bat erneut starten, die Zeile
-   "BiteCheck Test: Flagged" anklicken, "Allow flagged mod..." -> bestätigen ->
-   ALLOW eintippen -> "Start Project Zomboid". Jetzt sollte im Log auch die
-   Zeile für "flagged" erscheinen.
+   "BiteCheck Test: Flagged" (oder "Suspicious") anklicken, "Allow anyway..." ->
+   bestätigen -> ALLOW eintippen -> "Start Project Zomboid". Jetzt sollte im Log
+   auch die Zeile für diese Mod erscheinen.
 
 
 Was ich von dir zurück brauche
@@ -81,7 +88,7 @@ Was ich von dir zurück brauche
 
 Aufräumen nach dem Test
 -----------------------
-- Die drei BiteCheckTest-Ordner aus %USERPROFILE%\Zomboid\mods\ löschen.
+- Die vier BiteCheckTest-Ordner aus %USERPROFILE%\Zomboid\mods\ löschen.
 - Optional die alte Freigabe-Datei zurückholen: mod_approvals.json löschen und
   mod_approvals.json.bitecheck-backup in mod_approvals.json umbenennen.
 
