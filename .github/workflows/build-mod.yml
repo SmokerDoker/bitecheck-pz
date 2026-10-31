@@ -1,5 +1,8 @@
-# Builds one mod release from its public source. Used twice per release (two independent
-# runners) by submission.yml and registry.yml. Has no secrets and read-only access.
+# Produces the jars of one mod release from its public source repository at the release commit.
+# Used twice per release (two independent runners) by submission.yml and registry.yml. Has no
+# secrets and read-only access.
+#   type "rebuild":   builds the jar with the release's build command (reproducible build)
+#   type "published": takes the jar(s) the author committed in the repository at that commit
 name: Build mod (reusable)
 
 on:
@@ -61,6 +64,7 @@ jobs:
           RELEASE: ${{ inputs.release }}
         run: tools/cli/build/install/bcz/bin/bcz release-info "registry/$RELEASE" --registry registry >> "$GITHUB_OUTPUT"
       - name: Set up the mod's JDK
+        if: steps.info.outputs.type == 'rebuild'
         uses: actions/setup-java@v4
         with:
           distribution: ${{ steps.info.outputs.jdk_distribution }}
@@ -76,19 +80,25 @@ jobs:
           git -C src checkout -q FETCH_HEAD
           test "$(git -C src rev-parse HEAD)" = "$COMMIT"
       - name: Build the mod
+        if: steps.info.outputs.type == 'rebuild'
         working-directory: src
         env:
           BUILD_COMMAND: ${{ steps.info.outputs.command }}
         run: bash -c "$BUILD_COMMAND"
-      - name: Hash the jar
+      - name: Hash the jars
         env:
-          ARTIFACT: ${{ steps.info.outputs.artifact }}
+          ARTIFACTS: ${{ steps.info.outputs.artifacts }}
         run: |
-          test -f "src/$ARTIFACT" || { echo "::error::artifact $ARTIFACT was not built"; exit 1; }
           mkdir out
-          cp "src/$ARTIFACT" out/mod.jar
-          sha256sum out/mod.jar | cut -d' ' -f1 > out/sha256.txt
-          echo "SHA-256 ($RUNNER_OS, ${{ inputs.runner }}): $(cat out/sha256.txt)" >> "$GITHUB_STEP_SUMMARY"
+          : > out/sha256.txt
+          i=0
+          for artifact in $ARTIFACTS; do
+            test -f "src/$artifact" || { echo "::error::artifact $artifact not found"; exit 1; }
+            cp "src/$artifact" "out/$i.jar"
+            echo "$(sha256sum "out/$i.jar" | cut -d' ' -f1)  $artifact" >> out/sha256.txt
+            i=$((i + 1))
+          done
+          { echo "SHA-256 (${{ inputs.runner }}):"; echo '```'; cat out/sha256.txt; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
       - uses: actions/upload-artifact@v4
         with:
           name: build-${{ inputs.builder }}-${{ inputs.key }}

@@ -22,6 +22,15 @@ public final class Records {
      */
     public static Path writeBuildRecord(Path releaseFile, Path jar, List<String> builders)
             throws IOException, Toml.TomlException {
+        return writeBuildRecord(releaseFile, List.of(jar), builders);
+    }
+
+    /**
+     * Writes the build record for one or more jars. For a "published" release, pass the jars in
+     * the order of the release's {@code artifacts} list; they are recorded with their paths.
+     */
+    public static Path writeBuildRecord(Path releaseFile, List<Path> jars, List<String> builders)
+            throws IOException, Toml.TomlException {
         Map<String, Object> release = Toml.parse(releaseFile);
         String mod = Toml.string(release, "mod");
         String version = Toml.string(release, "version");
@@ -30,25 +39,51 @@ public final class Records {
         if (!releaseFile.getFileName().toString().equals(version + ".toml")) {
             throw new IllegalArgumentException("release file must be named " + version + ".toml");
         }
+        Map<String, Object> build = Toml.table(release, "build");
+        boolean published = "published".equals(Toml.string(build, "type"));
+        List<String> paths = Releases.artifacts(release);
+        if (jars.isEmpty() || (published && jars.size() != paths.size()) || (!published && jars.size() != 1)) {
+            throw new IllegalArgumentException(published
+                    ? "pass one jar per artifact (" + paths.size() + ") in the release's order"
+                    : "pass exactly one jar");
+        }
         StringBuilder out = new StringBuilder();
         out.append("# Build record written by CI. Signed by the registry key.\n");
         out.append("mod = ").append(Toml.quote(mod)).append('\n');
         out.append("version = ").append(Toml.quote(version)).append('\n');
+        out.append("method = ").append(Toml.quote(published ? "published" : "rebuild")).append('\n');
         out.append("release_sha256 = ").append(Toml.quote(Hashing.sha256Hex(releaseFile))).append('\n');
-        out.append("jar_sha256 = ").append(Toml.quote(Hashing.sha256Hex(jar))).append('\n');
+        if (published) {
+            out.append("artifact_paths = ").append(array(paths)).append('\n');
+            List<String> hashes = new java.util.ArrayList<>();
+            for (Path jar : jars) {
+                hashes.add(Hashing.sha256Hex(jar));
+            }
+            out.append("artifact_sha256 = ").append(array(hashes)).append('\n');
+        } else {
+            out.append("jar_sha256 = ").append(Toml.quote(Hashing.sha256Hex(jars.get(0)))).append('\n');
+        }
         out.append("built_at = ").append(Toml.quote(Instant.now().truncatedTo(ChronoUnit.SECONDS).toString()))
                 .append('\n');
-        out.append("builders = [");
-        for (int i = 0; i < builders.size(); i++) {
-            out.append(i == 0 ? "" : ", ").append(Toml.quote(builders.get(i)));
-        }
-        out.append("]\n");
+        out.append("builders = ").append(array(builders)).append('\n');
         Path target = releaseFile.resolveSibling(version + ".build.toml");
         writeNew(target, out.toString());
         return target;
     }
 
-    /** Writes {@code reviews/<version>/<reviewer>.toml} for the release. Sign it afterwards. */
+    private static String array(List<String> values) {
+        StringBuilder out = new StringBuilder("[");
+        for (int i = 0; i < values.size(); i++) {
+            out.append(i == 0 ? "" : ", ").append(Toml.quote(values.get(i)));
+        }
+        return out.append(']').toString();
+    }
+
+    /**
+     * Writes {@code reviews/<version>/<reviewer>.toml}. With a jar, the review covers that jar;
+     * with {@code jar == null}, it covers the release's build record (all its jars), which must
+     * exist already. Sign the file afterwards.
+     */
     public static Path writeReview(Path releaseFile, Path jar, String reviewer, String verdict, String scope,
             String notes) throws IOException, Toml.TomlException {
         Registry.requireName(reviewer, "reviewer");
@@ -69,7 +104,15 @@ public final class Records {
         StringBuilder out = new StringBuilder();
         out.append("mod = ").append(Toml.quote(mod)).append('\n');
         out.append("version = ").append(Toml.quote(version)).append('\n');
-        out.append("jar_sha256 = ").append(Toml.quote(Hashing.sha256Hex(jar))).append('\n');
+        if (jar != null) {
+            out.append("jar_sha256 = ").append(Toml.quote(Hashing.sha256Hex(jar))).append('\n');
+        } else {
+            Path buildFile = releaseFile.resolveSibling(version + ".build.toml");
+            if (!Files.isRegularFile(buildFile)) {
+                throw new IOException("no build record " + buildFile.getFileName() + " to review yet");
+            }
+            out.append("build_sha256 = ").append(Toml.quote(Hashing.sha256Hex(buildFile))).append('\n');
+        }
         out.append("reviewer = ").append(Toml.quote(reviewer)).append('\n');
         out.append("verdict = ").append(Toml.quote(verdict)).append('\n');
         out.append("scope = ").append(Toml.quote(scope)).append('\n');

@@ -1,0 +1,8 @@
+# How many reviews a release needs before launchers treat it as verified.
+# Default: two approvals from different reviewers, at least one of them "trusted".
+#
+# While the registry has only one reviewer (bootstrap), this can be lowered to
+# required_approvals = 1 - every launcher then shows releases as verified after a
+# single trusted review. Raise it again as soon as there are more reviewers.
+required_approvals = 2
+required_trusted = 1

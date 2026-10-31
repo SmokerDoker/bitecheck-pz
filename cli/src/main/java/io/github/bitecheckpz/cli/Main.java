@@ -45,11 +45,15 @@ public final class Main {
                   Write a detached signature <file>.sig.
               bcz verify-sig <file> --pub <public-key>
                   Check <file>.sig against a public key.
-              bcz build-record <release.toml> <jar> [--builder <name>]...
-                  Write <version>.build.toml for a release (used by CI).
-              bcz review <release.toml> <jar> --reviewer <name> --verdict approve|reject|questions
+              bcz build-record <release.toml> <jar>... [--builder <name>]...
+                  Write <version>.build.toml for a release (used by CI). For a published release,
+                  pass one jar per artifact in the release's order.
+              bcz review <release.toml> [jar] --reviewer <name> --verdict approve|reject|questions
                          [--scope full|diff] [--notes <text>]
-                  Write a review file for a release. Sign it with 'bcz sign' afterwards.
+                  Write a review file for one jar, or without a jar for the whole build record.
+                  Sign it with 'bcz sign' afterwards.
+              bcz source-check <jar> <source-dir>
+                  Check that every class in a jar is declared in the source code. Exit 15 if not.
               bcz verify <jar> [--registry <dir>] [--registry-key <public-key>]
                   Check a mod jar against the registry.
                   Exit codes: 0 verified, 10 unverified, 11 flagged, 12 blocked, 13 invalid.
@@ -98,6 +102,7 @@ public final class Main {
                 case "lint" -> lint(parsed, out);
                 case "index" -> index(parsed, out);
                 case "release-info" -> releaseInfo(parsed, out);
+                case "source-check" -> sourceCheck(parsed, out);
                 default -> throw new UsageException("unknown command '" + parsed.command + "'");
             };
         } catch (UsageException e) {
@@ -159,15 +164,19 @@ public final class Main {
 
     private static int buildRecord(Args a, PrintStream out) throws IOException, Toml.TomlException, UsageException {
         Path release = Path.of(a.positional(0, "release.toml"));
-        Path jar = Path.of(a.positional(1, "jar"));
-        Path record = Records.writeBuildRecord(release, jar, a.options("builder"));
+        a.positional(1, "jar");
+        List<Path> jars = new ArrayList<>();
+        for (String p : a.positionals.subList(1, a.positionals.size())) {
+            jars.add(Path.of(p));
+        }
+        Path record = Records.writeBuildRecord(release, jars, a.options("builder"));
         out.println("Wrote " + record + " - sign it with the registry key.");
         return OK;
     }
 
     private static int review(Args a, PrintStream out) throws IOException, Toml.TomlException, UsageException {
         Path release = Path.of(a.positional(0, "release.toml"));
-        Path jar = Path.of(a.positional(1, "jar"));
+        Path jar = a.positionals.size() > 1 ? Path.of(a.positionals.get(1)) : null;
         Path file = Records.writeReview(release, jar, a.requiredOption("reviewer"), a.requiredOption("verdict"),
                 a.option("scope").orElse("full"), a.option("notes").orElse(""));
         out.println("Wrote " + file + " - now sign it: bcz sign " + file + " --key <your key>");
@@ -278,28 +287,53 @@ public final class Main {
         Registry.requireVersion(version);
         var modInfo = Toml.parse(registry.modDir(mod).resolve("mod.toml"));
         var build = Toml.table(release, "build");
-        String jdk = String.valueOf(Toml.string(build, "jdk"));
-        if (!jdk.matches("(temurin|zulu|corretto|microsoft|liberica|oracle)-[0-9]{2}")) {
-            throw new IllegalArgumentException("[build] jdk must look like temurin-25");
+        boolean published = "published".equals(Toml.string(build, "type"));
+        List<String> artifacts = io.github.bitecheckpz.core.Releases.artifacts(release);
+        if (artifacts.isEmpty() || !artifacts.stream().allMatch(io.github.bitecheckpz.core.Releases::isSafeArtifactPath)) {
+            throw new IllegalArgumentException("release artifacts are missing or invalid");
         }
-        String[] values = {
-            "mod", mod,
-            "version", version,
-            "source", Toml.string(modInfo, "source"),
-            "commit", Toml.string(release, "commit"),
-            "jdk_distribution", jdk.substring(0, jdk.indexOf('-')),
-            "jdk_version", jdk.substring(jdk.indexOf('-') + 1),
-            "command", Toml.string(build, "command"),
-            "artifact", Toml.string(build, "artifact"),
-        };
-        for (int i = 0; i < values.length; i += 2) {
-            String value = values[i + 1];
-            if (value == null || value.isBlank() || value.contains("\n") || value.contains("\r")) {
-                throw new IllegalArgumentException("release field " + values[i] + " is missing or invalid");
+        List<String> values = new ArrayList<>(List.of(
+                "mod", mod,
+                "version", version,
+                "type", published ? "published" : "rebuild",
+                "source", String.valueOf(Toml.string(modInfo, "source")),
+                "commit", String.valueOf(Toml.string(release, "commit")),
+                "artifacts", String.join(" ", artifacts)));
+        if (!published) {
+            String jdk = String.valueOf(Toml.string(build, "jdk"));
+            if (!jdk.matches("(temurin|zulu|corretto|microsoft|liberica|oracle)-[0-9]{2}")) {
+                throw new IllegalArgumentException("[build] jdk must look like temurin-25");
             }
-            out.println(values[i] + "=" + value);
+            values.addAll(List.of(
+                    "jdk_distribution", jdk.substring(0, jdk.indexOf('-')),
+                    "jdk_version", jdk.substring(jdk.indexOf('-') + 1),
+                    "command", String.valueOf(Toml.string(build, "command"))));
+        }
+        for (int i = 0; i < values.size(); i += 2) {
+            String value = values.get(i + 1);
+            if (value == null || value.isBlank() || value.equals("null") || value.contains("\n")
+                    || value.contains("\r")) {
+                throw new IllegalArgumentException("release field " + values.get(i) + " is missing or invalid");
+            }
+            out.println(values.get(i) + "=" + value);
+        }
+        if (!String.valueOf(Toml.string(release, "commit")).matches("[0-9a-f]{40}")) {
+            throw new IllegalArgumentException("commit must be a full 40-character hash");
         }
         return OK;
+    }
+
+    private static int sourceCheck(Args a, PrintStream out) throws IOException, UsageException {
+        Path jar = Path.of(a.positional(0, "jar"));
+        Path src = Path.of(a.positional(1, "source-dir"));
+        io.github.bitecheckpz.core.SourceCheck.Result r = io.github.bitecheckpz.core.SourceCheck.check(jar, src);
+        out.println(jar + ": " + r.classCount() + " classes, " + r.sourceFiles() + " source files");
+        if (r.ok()) {
+            out.println("  every class has a matching declaration in the source");
+        }
+        r.classesWithoutSource().forEach(c -> out.println("  NO SOURCE: " + c));
+        r.otherEntries().forEach(e -> out.println("  other file in jar: " + e));
+        return r.ok() ? OK : 15;
     }
 
     // ---- argument parsing ----

@@ -16,16 +16,20 @@ import java.util.stream.Stream;
  *
  * <p>A jar is {@link Status#VERIFIED} only if all of the following hold:
  * <ol>
- *   <li>a build record for its SHA-256 exists and is signed by the registry key,</li>
- *   <li>the release file named in that record is unchanged and signed by the mod's author,</li>
- *   <li>at least {@link #REQUIRED_APPROVALS} distinct reviewers (not the author) approved exactly
- *       this hash with valid signatures, at least one of them with level "trusted",</li>
- *   <li>there is no open critical flag for this hash.</li>
+ *   <li>a build record listing its SHA-256 exists and is signed by the registry key,</li>
+ *   <li>the release file named in that record is unchanged and signed by the mod's publisher
+ *       (or its author, if the entry has no separate publisher),</li>
+ *   <li>enough distinct reviewers (not the publisher) approved exactly this jar or this build
+ *       record with valid signatures, as required by the registry policy (default: 2 approvals,
+ *       at least 1 from a "trusted" reviewer),</li>
+ *   <li>there is no open critical flag for this hash, and the entry is not pending.</li>
  * </ol>
+ *
+ * <p>Build records come in two kinds ({@code method}): "rebuild" - CI built the jar from source
+ * twice and got identical bytes - and "published" - CI took the jar the author published in the
+ * source repository at the release commit, and reviewers checked it against the source.
  */
 public final class Verifier {
-
-    public static final int REQUIRED_APPROVALS = 2;
 
     public enum Status {
         /** Passed every check: load without asking. */
@@ -40,7 +44,11 @@ public final class Verifier {
         INVALID
     }
 
-    public record Result(Status status, String jarSha256, String mod, String version, List<String> messages) {
+    public record Result(Status status, String jarSha256, String mod, String version, List<String> messages,
+            String method) {
+        Result(Status status, String jarSha256, String mod, String version, List<String> messages) {
+            this(status, jarSha256, mod, version, messages, null);
+        }
     }
 
     private final Registry registry;
@@ -84,7 +92,7 @@ public final class Verifier {
             } catch (Toml.TomlException e) {
                 continue; // unrelated broken file; CI rejects these
             }
-            if (sha.equals(Toml.string(build, "jar_sha256"))) {
+            if (Registry.jarHashes(build).contains(sha)) {
                 candidates.add(checkCandidate(sha, buildFile, build));
             }
         }
@@ -135,7 +143,10 @@ public final class Verifier {
             messages.add("build record: registry " + buildSig.description());
             return new Result(Status.INVALID, sha, mod, version, messages);
         }
-        messages.add("reproducible build record signed by the registry");
+        String method = "published".equals(Toml.string(build, "method")) ? "published" : "rebuild";
+        messages.add(method.equals("published")
+                ? "published binary, build record signed by the registry"
+                : "reproducible build record signed by the registry");
 
         try {
             // 2. Release file unchanged and signed by the author.
@@ -161,25 +172,30 @@ public final class Verifier {
             Map<String, Object> modInfo = registry.read(modFile);
             if (Toml.bool(modInfo, "example")) {
                 messages.add("this is an example entry and is never verified");
-                return new Result(Status.UNVERIFIED, sha, mod, version, messages);
+                return new Result(Status.UNVERIFIED, sha, mod, version, messages, method);
             }
-            String author = Toml.string(modInfo, "author");
-            var authorKey = author == null ? Optional.<Keys.PublicKeyInfo>empty() : registry.authorKey(author);
+            if ("pending".equals(Toml.string(modInfo, "status"))) {
+                messages.add("this entry is still pending and not verified yet");
+                return new Result(Status.UNVERIFIED, sha, mod, version, messages, method);
+            }
+            String author = Registry.signer(modInfo);
+            var authorKey = author == null || !Registry.NAME.matcher(author).matches()
+                    ? Optional.<Keys.PublicKeyInfo>empty() : registry.authorKey(author);
             if (authorKey.isEmpty()) {
-                messages.add("no valid key for author '" + author + "'");
+                messages.add("no valid key for publisher '" + author + "'");
                 return new Result(Status.INVALID, sha, mod, version, messages);
             }
             Signatures.Check releaseSig = Signatures.verify(releaseFile, authorKey.get());
             if (releaseSig != Signatures.Check.VALID) {
-                messages.add("release file: author " + releaseSig.description());
+                messages.add("release file: publisher " + releaseSig.description());
                 return new Result(Status.INVALID, sha, mod, version, messages);
             }
-            messages.add("release signed by author '" + author + "'");
+            messages.add("release signed by '" + author + "'");
 
             // 3. Flags.
             Status flagStatus = checkFlags(sha, mod, messages);
             if (flagStatus != null) {
-                return new Result(flagStatus, sha, mod, version, messages);
+                return new Result(flagStatus, sha, mod, version, messages, method);
             }
 
             // 4. Reviews.
@@ -195,7 +211,8 @@ public final class Verifier {
                 for (Path reviewFile : reviewFiles) {
                     String fileName = reviewFile.getFileName().toString();
                     String reviewer = fileName.substring(0, fileName.length() - ".toml".length());
-                    String problem = checkReview(reviewFile, reviewer, sha, mod, version, author);
+                    String problem = checkReview(reviewFile, reviewer, sha, Hashing.sha256Hex(buildFile), mod,
+                            version, author);
                     if (problem != null) {
                         messages.add("review by '" + reviewer + "' not counted: " + problem);
                         continue;
@@ -211,12 +228,13 @@ public final class Verifier {
                     messages.add("approved by '" + reviewer + "' (" + level + ")");
                 }
             }
-            if (approvals >= REQUIRED_APPROVALS && trusted >= 1) {
-                return new Result(Status.VERIFIED, sha, mod, version, messages);
+            Registry.Policy policy = registry.policy();
+            if (approvals >= policy.requiredApprovals() && trusted >= policy.requiredTrusted()) {
+                return new Result(Status.VERIFIED, sha, mod, version, messages, method);
             }
-            messages.add("needs " + REQUIRED_APPROVALS + " approvals incl. 1 trusted reviewer, has "
-                    + approvals + " (" + trusted + " trusted)");
-            return new Result(Status.UNVERIFIED, sha, mod, version, messages);
+            messages.add("needs " + policy.requiredApprovals() + " approval(s) incl. " + policy.requiredTrusted()
+                    + " trusted reviewer(s), has " + approvals + " (" + trusted + " trusted)");
+            return new Result(Status.UNVERIFIED, sha, mod, version, messages, method);
         } catch (Toml.TomlException e) {
             messages.add("cannot read registry file: " + e.getMessage());
             return new Result(Status.INVALID, sha, mod, version, messages);
@@ -224,13 +242,13 @@ public final class Verifier {
     }
 
     /** Returns null if the review counts as an approval, otherwise the reason it does not. */
-    private String checkReview(Path file, String reviewer, String sha, String mod, String version, String author)
-            throws IOException, Toml.TomlException {
+    private String checkReview(Path file, String reviewer, String sha, String buildSha, String mod, String version,
+            String author) throws IOException, Toml.TomlException {
         if (!Registry.NAME.matcher(reviewer).matches()) {
             return "invalid reviewer name";
         }
         if (reviewer.equals(author)) {
-            return "authors cannot review their own mod";
+            return "the publisher cannot review their own entry";
         }
         Map<String, Object> review = registry.read(file);
         if (!reviewer.equals(Toml.string(review, "reviewer"))) {
@@ -239,7 +257,8 @@ public final class Verifier {
         if (!mod.equals(Toml.string(review, "mod")) || !version.equals(Toml.string(review, "version"))) {
             return "review is for a different mod or version";
         }
-        if (!sha.equals(Toml.string(review, "jar_sha256"))) {
+        // A review covers either one jar (jar_sha256) or a whole build record (build_sha256).
+        if (!sha.equals(Toml.string(review, "jar_sha256")) && !buildSha.equals(Toml.string(review, "build_sha256"))) {
             return "review is for a different file";
         }
         if (!"approve".equals(Toml.string(review, "verdict"))) {

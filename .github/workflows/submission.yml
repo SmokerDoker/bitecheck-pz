@@ -89,16 +89,21 @@ jobs:
       - name: Compare the two builds
         run: |
           echo "### Reproducible build: \`${{ matrix.key }}\`" >> "$GITHUB_STEP_SUMMARY"
-          if [ "$(cat a/sha256.txt)" != "$(cat b/sha256.txt)" ]; then
-            echo "❌ The two builds differ: \`$(cat a/sha256.txt)\` vs \`$(cat b/sha256.txt)\`. See CONTRIBUTING.md for reproducible builds." >> "$GITHUB_STEP_SUMMARY"
+          if ! diff -q a/sha256.txt b/sha256.txt >/dev/null; then
+            { echo "❌ The two builds differ. See CONTRIBUTING.md for reproducible builds."; echo '```'; diff a/sha256.txt b/sha256.txt; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
             exit 1
           fi
-          echo "✅ Both builds produced \`$(cat a/sha256.txt)\`" >> "$GITHUB_STEP_SUMMARY"
-      - name: Scan the jar
-        run: cli/build/install/bcz/bin/bcz scan a/mod.jar --format markdown >> "$GITHUB_STEP_SUMMARY"
+          { echo "✅ Both runners produced identical jars:"; echo '```'; cat a/sha256.txt; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
+      - name: Scan the jars
+        run: |
+          status=0
+          for jar in a/*.jar; do
+            cli/build/install/bcz/bin/bcz scan "$jar" --format markdown >> "$GITHUB_STEP_SUMMARY" || status=$?
+          done
+          exit $status
       - uses: actions/upload-artifact@v4
         if: always()
         with:
           name: mod-${{ matrix.key }}
-          path: a/mod.jar
+          path: a/
           retention-days: 90

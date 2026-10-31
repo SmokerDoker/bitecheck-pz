@@ -152,9 +152,74 @@ public final class SelfTest {
             Files.writeString(f.reviewFile("carol"), "\nverdict2 = \"x\"\n", java.nio.file.StandardOpenOption.APPEND);
             Files.createDirectories(f.dir.resolve("registry/mods/Bad_Name"));
             List<String> problems = Lint.check(f.registry(), java.util.Optional.of(f.registryKey));
-            expect(problems.stream().anyMatch(p -> p.contains("1.0.0.toml: author signature")), true);
+            expect(problems.stream().anyMatch(p -> p.contains("1.0.0.toml: publisher signature")), true);
             expect(problems.stream().anyMatch(p -> p.contains("carol.toml: reviewer signature")), true);
             expect(problems.stream().anyMatch(p -> p.contains("Bad_Name")), true);
+        });
+
+        run("published: multi-jar release reviewed as a whole is VERIFIED for every jar", () -> {
+            Fixture f = Fixture.create();
+            Published p = Published.add(f, false);
+            for (Path jar : p.jars) {
+                Verifier.Result r = new Verifier(f.registry(), f.registryKey).verify(jar);
+                expect(r.status(), Verifier.Status.VERIFIED);
+                expect(r.method(), "published");
+            }
+            expect(Lint.check(f.registry(), java.util.Optional.of(f.registryKey)), List.of());
+            Path index = f.dir.resolve("index.toml");
+            Files.writeString(index, Index.generate(f.registry(), new Verifier(f.registry(), f.registryKey),
+                    java.time.Instant.now(), ""));
+            expect(Index.parse(index).lookup(Hashing.sha256Hex(p.jars.get(1))).label().contains("published binary"),
+                    true);
+        });
+        run("published: publisher signs, author is just a name; publisher cannot review", () -> {
+            Fixture f = Fixture.create();
+            Published p = Published.add(f, false);
+            Files.delete(p.dir.resolve("reviews/2.0.0/carol.toml"));
+            Path selfReview = Records.writeReview(p.release, null, "alice", "approve", "full", "mine");
+            Signatures.sign(selfReview, f.author);
+            expect(new Verifier(f.registry(), f.registryKey).verify(p.jars.get(0)).status(),
+                    Verifier.Status.UNVERIFIED);
+        });
+        run("policy: bootstrap policy with one trusted approval", () -> {
+            Fixture f = Fixture.create();
+            Files.delete(f.reviewFile("carol"));
+            expect(f.verify().status(), Verifier.Status.UNVERIFIED);
+            Files.writeString(f.dir.resolve("registry/policy.toml"), "required_approvals = 1\nrequired_trusted = 1\n");
+            expect(f.verify().status(), Verifier.Status.VERIFIED);
+            Files.delete(f.reviewFile("bob"));
+            Path carol = Records.writeReview(f.releaseFile, f.jar, "carol", "approve", "full", "x");
+            Signatures.sign(carol, f.carol);
+            expect(f.verify().status(), Verifier.Status.UNVERIFIED); // carol is not trusted
+        });
+        run("pending: unsigned pending entry passes lint and is never VERIFIED", () -> {
+            Fixture f = Fixture.create();
+            Published p = Published.add(f, true);
+            expect(Lint.check(f.registry(), java.util.Optional.of(f.registryKey)), List.of());
+            expect(new Verifier(f.registry(), f.registryKey).verify(p.jars.get(0)).status(),
+                    Verifier.Status.UNVERIFIED);
+        });
+        run("source-check: classes match their sources; extra class is reported", () -> {
+            Path src = Files.createTempDirectory("bcz-src");
+            Files.writeString(src.resolve("A.java"), "package x.y;\n// class Fake {}\npublic class A {\n"
+                    + "  class Inner {}\n  Runnable r = new Runnable() { public void run() {} };\n}\n");
+            Path jar = Files.createTempFile("bcz-sc", ".jar");
+            try (var zip = new java.util.zip.ZipOutputStream(Files.newOutputStream(jar))) {
+                for (String e : List.of("x/y/A.class", "x/y/A$Inner.class", "x/y/A$1.class", "META-INF/MANIFEST.MF")) {
+                    zip.putNextEntry(new java.util.zip.ZipEntry(e));
+                    zip.closeEntry();
+                }
+            }
+            SourceCheck.Result ok = SourceCheck.check(jar, src);
+            expect(ok.ok(), true);
+            expect(ok.classCount(), 3);
+            try (var zip = new java.util.zip.ZipOutputStream(Files.newOutputStream(jar))) {
+                for (String e : List.of("x/y/A.class", "x/y/Fake.class")) {
+                    zip.putNextEntry(new java.util.zip.ZipEntry(e));
+                    zip.closeEntry();
+                }
+            }
+            expect(SourceCheck.check(jar, src).classesWithoutSource(), List.of("x.y.Fake"));
         });
 
         System.out.println();
@@ -275,6 +340,43 @@ public final class SelfTest {
             zip.closeEntry();
         }
         return jar;
+    }
+
+    /** A "published" release with two jars, published by alice for an upstream author. */
+    private static final class Published {
+        Path dir;
+        Path release;
+        List<Path> jars = new ArrayList<>();
+
+        static Published add(Fixture f, boolean pending) throws Exception {
+            Published p = new Published();
+            p.dir = f.dir.resolve("registry/mods/upstream-fps");
+            Files.createDirectories(p.dir.resolve("releases"));
+            Files.writeString(p.dir.resolve("mod.toml"), "id = \"upstream-fps\"\nname = \"Upstream FPS\"\n"
+                    + "author = \"Some Upstream Author\"\npublisher = \"alice\"\n"
+                    + "source = \"https://example.invalid/fps\"\nlicense = \"MIT\"\n"
+                    + "status = \"" + (pending ? "pending" : "active") + "\"\n");
+            p.release = p.dir.resolve("releases/2.0.0.toml");
+            Files.writeString(p.release, "mod = \"upstream-fps\"\nversion = \"2.0.0\"\n"
+                    + "commit = \"0123456789abcdef0123456789abcdef01234567\"\n[build]\ntype = \"published\"\n"
+                    + "artifacts = [\"42/media/java/client/Fps-2x.jar\", \"42/media/java/client/Fps.jar\"]\n");
+            for (String name : List.of("fps-2x", "fps")) {
+                Path jar = f.dir.resolve(name + ".jar");
+                Files.writeString(jar, "jar " + name);
+                p.jars.add(jar);
+            }
+            if (pending) {
+                return p;
+            }
+            Signatures.sign(p.release, f.author);
+            Path build = Records.writeBuildRecord(p.release, p.jars, List.of("a", "b"));
+            Signatures.sign(build, f.registry);
+            for (var reviewer : List.of(Map.entry("bob", f.bob), Map.entry("carol", f.carol))) {
+                Path review = Records.writeReview(p.release, null, reviewer.getKey(), "approve", "full", "ok");
+                Signatures.sign(review, reviewer.getValue());
+            }
+            return p;
+        }
     }
 
     // ---- fixture: a small registry with one fully approved release ----

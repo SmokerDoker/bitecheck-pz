@@ -108,18 +108,17 @@ public final class Index {
         Map<String, String> flagged = new TreeMap<>();
         Map<String, String> blocked = new TreeMap<>();
         for (Path buildFile : registry.buildFiles()) {
-            String sha = Toml.string(registry.read(buildFile), "jar_sha256");
-            if (!Hashing.isSha256Hex(sha)) {
-                continue;
-            }
-            Verifier.Result r = verifier.verifyHash(sha);
-            String label = r.mod() + " " + r.version();
-            switch (r.status()) {
-                case VERIFIED -> verified.put(sha, label);
-                case FLAGGED -> flagged.put(sha, label + ": " + lastMessage(r));
-                case BLOCKED -> blocked.put(sha, label + ": " + lastMessage(r));
-                default -> {
-                    // unverified or invalid: not listed, the launcher treats it as unverified
+            for (String sha : Registry.jarHashes(registry.read(buildFile))) {
+                Verifier.Result r = verifier.verifyHash(sha);
+                String label = r.mod() + " " + r.version()
+                        + ("published".equals(r.method()) ? " (published binary, reviewed against source)" : "");
+                switch (r.status()) {
+                    case VERIFIED -> verified.put(sha, label);
+                    case FLAGGED -> flagged.put(sha, label + ": " + lastMessage(r));
+                    case BLOCKED -> blocked.put(sha, label + ": " + lastMessage(r));
+                    default -> {
+                        // unverified or invalid: not listed, the launcher treats it as unverified
+                    }
                 }
             }
         }

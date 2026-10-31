@@ -99,6 +99,51 @@ public final class Registry {
         return level == null ? "new" : level;
     }
 
+    /** How many reviews a release needs. */
+    public record Policy(int requiredApprovals, int requiredTrusted) {
+        public static final Policy DEFAULT = new Policy(2, 1);
+    }
+
+    /**
+     * Review policy from registry/policy.toml ({@code required_approvals}, {@code required_trusted}).
+     * Defaults to 2 approvals incl. 1 trusted; values below 1 are raised to 1.
+     */
+    public Policy policy() throws IOException, Toml.TomlException {
+        Path file = root.resolve("registry").resolve("policy.toml");
+        if (!Files.isRegularFile(file)) {
+            return Policy.DEFAULT;
+        }
+        Map<String, Object> doc = Toml.parse(file);
+        long approvals = doc.get("required_approvals") instanceof Long l ? l : Policy.DEFAULT.requiredApprovals();
+        long trusted = doc.get("required_trusted") instanceof Long l ? l : Policy.DEFAULT.requiredTrusted();
+        int a = (int) Math.max(1, Math.min(approvals, 10));
+        int t = (int) Math.max(1, Math.min(trusted, a));
+        return new Policy(a, t);
+    }
+
+    /** All jar hashes a build record vouches for: jar_sha256 and/or artifact_sha256 = [...]. */
+    public static List<String> jarHashes(Map<String, Object> build) {
+        List<String> hashes = new ArrayList<>();
+        String single = Toml.string(build, "jar_sha256");
+        if (Hashing.isSha256Hex(single)) {
+            hashes.add(single);
+        }
+        if (build.get("artifact_sha256") instanceof List<?> list) {
+            for (Object o : list) {
+                if (o instanceof String sha && Hashing.isSha256Hex(sha) && !hashes.contains(sha)) {
+                    hashes.add(sha);
+                }
+            }
+        }
+        return hashes;
+    }
+
+    /** The key name that signs releases: the publisher if set, otherwise the author. */
+    public static String signer(Map<String, Object> modInfo) {
+        String publisher = Toml.string(modInfo, "publisher");
+        return publisher != null ? publisher : Toml.string(modInfo, "author");
+    }
+
     /** Reason a jar hash is on the block list, if it is. */
     public Optional<String> blockReason(String jarSha256) throws IOException, Toml.TomlException {
         Path file = root.resolve("registry").resolve("blocklist.toml");
