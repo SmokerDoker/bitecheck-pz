@@ -124,6 +124,53 @@ public final class Records {
         return target;
     }
 
+    /** Verdicts of an AI pre-analysis. */
+    public static final List<String> ANALYSIS_VERDICTS = List.of("no-concerns", "concerns", "failed");
+
+    /**
+     * Writes {@code <version>.analysis.toml} for an AI pre-analysis of the release's build record.
+     * The report is copied to {@code <version>.analysis.md} and covered by its hash. The registry
+     * signs the record afterwards (CI).
+     */
+    public static Path writeAnalysis(Path releaseFile, String model, String effort, String verdict, String summary,
+            Path report) throws IOException, Toml.TomlException {
+        if (!ANALYSIS_VERDICTS.contains(verdict)) {
+            throw new IllegalArgumentException("verdict must be one of " + ANALYSIS_VERDICTS);
+        }
+        Map<String, Object> release = Toml.parse(releaseFile);
+        String mod = Toml.string(release, "mod");
+        String version = Toml.string(release, "version");
+        Registry.requireName(mod, "mod");
+        Registry.requireVersion(version);
+        Path buildFile = releaseFile.resolveSibling(version + ".build.toml");
+        if (!Files.isRegularFile(buildFile)) {
+            throw new IOException("no build record " + buildFile.getFileName() + " to analyze yet");
+        }
+        Path reportTarget = releaseFile.resolveSibling(version + ".analysis.md");
+        Path target = releaseFile.resolveSibling(version + ".analysis.toml");
+        if (Files.exists(target)) {
+            throw new FileAlreadyExistsException(target.toString(), null, "already exists");
+        }
+        if (!report.toAbsolutePath().normalize().equals(reportTarget.toAbsolutePath().normalize())) {
+            Files.copy(report, reportTarget, java.nio.file.StandardCopyOption.REPLACE_EXISTING);
+        }
+        StringBuilder out = new StringBuilder();
+        out.append("# AI pre-analysis written by CI. Signed by the registry key. Not an approval.\n");
+        out.append("mod = ").append(Toml.quote(mod)).append('\n');
+        out.append("version = ").append(Toml.quote(version)).append('\n');
+        out.append("build_sha256 = ").append(Toml.quote(Hashing.sha256Hex(buildFile))).append('\n');
+        out.append("model = ").append(Toml.quote(model)).append('\n');
+        out.append("effort = ").append(Toml.quote(effort)).append('\n');
+        out.append("analyzed_at = ").append(Toml.quote(Instant.now().truncatedTo(ChronoUnit.SECONDS).toString()))
+                .append('\n');
+        out.append("verdict = ").append(Toml.quote(verdict)).append('\n');
+        out.append("summary = ").append(Toml.quote(summary == null ? "" : summary.replaceAll("\\s+", " ").strip()))
+                .append('\n');
+        out.append("report_sha256 = ").append(Toml.quote(Hashing.sha256Hex(reportTarget))).append('\n');
+        writeNew(target, out.toString());
+        return target;
+    }
+
     private static void writeNew(Path target, String content) throws IOException {
         if (Files.exists(target)) {
             throw new FileAlreadyExistsException(target.toString(), null, "already exists");

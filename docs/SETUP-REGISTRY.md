@@ -20,6 +20,7 @@ This writes `keys/registry.pub` (commit it) and `~/.bitecheck/keys/registry.key`
 2. Under **Deployment branches**, allow only `main`.
 3. Optional but recommended: add yourself as a **required reviewer**, so every signing run waits for your approval.
 4. In the environment, **Add secret** `BITECHECK_REGISTRY_KEY` and paste the full content of `registry.key` (all three lines).
+5. For the AI pre-analysis (`ai_prereview = true` in `registry/policy.toml`): in the same environment, **Add secret** `ANTHROPIC_API_KEY` with a key from the [Claude Console](https://console.anthropic.com/). Set a monthly spend limit there; each analysis is one request to `claude-opus-5-5` with effort `high`, at most 10 per workflow run.
 
 ## 3. Commit the public key
 
@@ -44,7 +45,7 @@ Reviewers are added with a public key in `keys/reviewers/<name>.pub` and an entr
 level = "trusted"   # new | reviewer | trusted
 ```
 
-A release is verified with two approvals from different reviewers, at least one `trusted`.
+How many approvals a release needs is set in `registry/policy.toml`. The start-up policy is one approval from a `trusted` reviewer plus a signed AI pre-analysis of the exact build; raise `required_approvals` to 2 once there are more reviewers.
 
 ## Rotating a compromised key
 

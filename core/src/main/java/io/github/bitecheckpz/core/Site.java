@@ -22,8 +22,9 @@ public final class Site {
     public record JarRow(String sha256, Verifier.Status status, String detail) {
     }
 
+    /** @param analysis the AI pre-analysis record, or null */
     public record ReleaseRow(String version, String commit, String type, List<String> artifacts,
-            boolean built, List<JarRow> jars, List<Map<String, Object>> reviews) {
+            boolean built, List<JarRow> jars, List<Map<String, Object>> reviews, Map<String, Object> analysis) {
     }
 
     public record ModRow(String id, String name, String author, String publisher, String source, String license,
@@ -103,8 +104,10 @@ public final class Site {
                     }
                 }
                 String type = Optional.ofNullable(Toml.string(Toml.table(rel, "build"), "type")).orElse("rebuild");
+                Path analysisFile = f.resolveSibling(name.substring(0, name.length() - 5) + ".analysis.toml");
+                Map<String, Object> analysis = Files.isRegularFile(analysisFile) ? registry.read(analysisFile) : null;
                 releases.add(new ReleaseRow(version, str(rel, "commit"), type, Releases.artifacts(rel), built, jars,
-                        reviews));
+                        reviews, analysis));
             }
             List<Map<String, Object>> flags = new ArrayList<>();
             for (Path fl : list(modDir.resolve("flags"))) {
@@ -196,6 +199,7 @@ public final class Site {
             if ("pending".equals(m.status())) {
                 h.append("<p class=\"meta\">Prepared, not yet signed by the publisher. Nothing of this mod is verified yet.</p>\n");
             }
+            String modId = m.id();
             for (ReleaseRow r : m.releases()) {
                 h.append("<h3>").append(esc(r.version())).append(" <span class=\"meta\">· ")
                         .append("published".equals(r.type()) ? "published jars, reviewed against source"
@@ -222,6 +226,17 @@ public final class Site {
                     }
                 }
                 h.append("</table></div>\n");
+                if (r.analysis() != null) {
+                    Map<String, Object> an = r.analysis();
+                    String verdict = nz(str(an, "verdict"));
+                    h.append("<p class=\"meta\">AI pre-analysis (").append(esc(nz(str(an, "model")))).append(", ")
+                            .append(esc(date(str(an, "analyzed_at")))).append("): <span class=\"")
+                            .append(verdict.equals("no-concerns") ? "verified" : "flagged").append("\">")
+                            .append(esc(verdict)).append("</span> - ").append(esc(nz(str(an, "summary"))))
+                            .append(" · <a href=\"").append(esc(repoUrl)).append("/blob/main/registry/mods/")
+                            .append(esc(modId)).append("/releases/").append(esc(r.version()))
+                            .append(".analysis.md\">report</a> · an aid for reviewers, not an approval</p>\n");
+                }
                 if (!r.reviews().isEmpty()) {
                     h.append("<div class=\"scroll\"><table><tr><th>Reviewer</th><th>Verdict</th><th>Date</th><th>Notes</th></tr>\n");
                     for (Map<String, Object> rv : r.reviews()) {

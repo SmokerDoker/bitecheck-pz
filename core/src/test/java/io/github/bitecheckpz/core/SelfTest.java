@@ -211,6 +211,33 @@ public final class SelfTest {
             Signatures.sign(carol, f.carol);
             expect(f.verify().status(), Verifier.Status.UNVERIFIED); // carol is not trusted
         });
+        run("policy: one trusted approval plus a signed AI pre-analysis", () -> {
+            Fixture f = Fixture.create();
+            Files.delete(f.reviewFile("carol"));
+            Files.writeString(f.dir.resolve("registry/policy.toml"),
+                    "required_approvals = 1\nrequired_trusted = 1\nai_prereview = true\n");
+            Verifier.Result r = f.verify();
+            expect(r.status(), Verifier.Status.UNVERIFIED);
+            expect(String.join("|", r.messages()).contains("AI pre-analysis is missing"), true);
+            Path report = f.dir.resolve("report.md");
+            Files.writeString(report, "# Report\nNo concerns.\n");
+            Path analysis = Records.writeAnalysis(f.releaseFile, "claude-opus-5-5", "high", "no-concerns",
+                    "Nothing found.", report);
+            expect(f.verify().status(), Verifier.Status.INVALID); // not signed yet
+            Signatures.sign(analysis, f.registry);
+            expect(f.verify().status(), Verifier.Status.VERIFIED);
+            expect(Site.render(Site.collect(f.registry(), java.util.Optional.of(f.registryKey)),
+                    java.time.Instant.now(), "https://example.invalid/repo", true).contains("Nothing found."), true);
+            expect(Lint.check(f.registry(), java.util.Optional.of(f.registryKey)), List.of());
+            // the report is covered by the signed record
+            Path stored = f.releaseFile.resolveSibling("1.0.0.analysis.md");
+            Files.writeString(stored, "# Report\nAll fine, trust me.\n");
+            expect(f.verify().status(), Verifier.Status.INVALID);
+            // the AI analysis alone never verifies anything
+            Files.writeString(stored, "# Report\nNo concerns.\n");
+            Files.delete(f.reviewFile("bob"));
+            expect(f.verify().status(), Verifier.Status.UNVERIFIED);
+        });
         run("pending: unsigned pending entry passes lint and is never VERIFIED", () -> {
             Fixture f = Fixture.create();
             Published p = Published.add(f, true);
