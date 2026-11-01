@@ -229,13 +229,6 @@ public final class Verifier {
                 }
             }
             Registry.Policy policy = registry.policy();
-            if (policy.aiPrereview()) {
-                // 5. Signed AI pre-analysis of exactly this build (never counts as an approval).
-                Status analysis = checkAnalysis(mod, version, Hashing.sha256Hex(buildFile), messages);
-                if (analysis != null) {
-                    return new Result(analysis, sha, mod, version, messages, method);
-                }
-            }
             if (approvals >= policy.requiredApprovals() && trusted >= policy.requiredTrusted()) {
                 return new Result(Status.VERIFIED, sha, mod, version, messages, method);
             }
@@ -246,42 +239,6 @@ public final class Verifier {
             messages.add("cannot read registry file: " + e.getMessage());
             return new Result(Status.INVALID, sha, mod, version, messages);
         }
-    }
-
-    /**
-     * Checks the AI pre-analysis record. Returns null if it is present, signed by the registry and
-     * covers this build; otherwise the status the release gets (UNVERIFIED or INVALID).
-     */
-    private Status checkAnalysis(String mod, String version, String buildSha, List<String> messages)
-            throws IOException, Toml.TomlException {
-        Path file = registry.analysisFile(mod, version);
-        if (!Files.isRegularFile(file)) {
-            messages.add("AI pre-analysis is missing (required by the registry policy)");
-            return Status.UNVERIFIED;
-        }
-        Signatures.Check sig = Signatures.verify(file, registryKey);
-        if (sig != Signatures.Check.VALID) {
-            messages.add("AI pre-analysis: registry " + sig.description());
-            return Status.INVALID;
-        }
-        Map<String, Object> doc = registry.read(file);
-        if (!mod.equals(Toml.string(doc, "mod")) || !version.equals(Toml.string(doc, "version"))
-                || !buildSha.equals(Toml.string(doc, "build_sha256"))) {
-            messages.add("AI pre-analysis covers a different build");
-            return Status.UNVERIFIED;
-        }
-        Path report = registry.analysisReport(mod, version);
-        if (!Files.isRegularFile(report) || !Hashing.sha256Hex(report).equals(Toml.string(doc, "report_sha256"))) {
-            messages.add("AI pre-analysis report is missing or was changed");
-            return Status.INVALID;
-        }
-        String verdict = Toml.string(doc, "verdict");
-        if ("failed".equals(verdict) || verdict == null) {
-            messages.add("AI pre-analysis did not complete");
-            return Status.UNVERIFIED;
-        }
-        messages.add("AI pre-analysis by " + Toml.string(doc, "model") + ": " + verdict);
-        return null;
     }
 
     /** Returns null if the review counts as an approval, otherwise the reason it does not. */

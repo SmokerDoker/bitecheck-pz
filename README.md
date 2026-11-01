@@ -66,7 +66,7 @@ Your mod is never blocked while it waits for review: players can load it as an u
 - [x] Steam launch options integration (`--wrap %command%`) and dedicated server mode ([docs/SERVER.md](docs/SERVER.md))
 - [x] Registry website generated from the registry files (`bcz site`, GitHub Pages)
 - [x] Installers for Windows, macOS and Linux built by GitHub Actions (`release.yml`)
-- [x] Start-up policy: one trusted review plus a signed AI pre-analysis (Copilot or Claude API)
+- [x] Start-up policy: one trusted review (later two, see `registry/policy.toml`)
 - [x] First three mods prepared as pending entries with preliminary reviews ([docs/reviews](docs/reviews/README.md))
 - [ ] First test with real players
 - [ ] Registry key set up ([docs/SETUP-REGISTRY.md](docs/SETUP-REGISTRY.md)) and first real mods
