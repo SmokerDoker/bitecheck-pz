@@ -1,14 +1,17 @@
 # What a release needs before launchers treat it as verified.
 #
 # Start-up policy (2026-11): one approval from a trusted human reviewer, plus a signed AI
-# pre-analysis of exactly the jars that were built. CI runs the analysis with a strong model
-# (claude-opus-5-5, effort high) and stores the report next to the release
+# pre-analysis of exactly the jars that were built. CI runs the analysis (GitHub Copilot CLI by
+# default, see docs/SETUP-REGISTRY.md) and stores the report next to the release
 # (<version>.analysis.md); the reviewer reads it before signing the review.
 #
 # The AI analysis is an aid, never an approval: a release without a human approval stays
 # unverified whatever the model says, and a "concerns" verdict leaves the decision to the reviewer.
 #
-# Raise required_approvals to 2 as soon as there are more reviewers.
+# Planned once there are enough reviewers: two approvals from different reviewers - one may be
+# a newcomer (level "new"), the other must have a higher level ("reviewer" or "trusted").
+# That needs a small policy extension (e.g. required_experienced = 1); until then, raising
+# required_approvals to 2 keeps required_trusted = 1.
 required_approvals = 1
 required_trusted = 1
 ai_prereview = true

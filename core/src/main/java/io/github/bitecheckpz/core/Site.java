@@ -161,10 +161,12 @@ public final class Site {
                 <h1>BiteCheck Registry</h1>
                 <p class="lead">Java mods for Project Zomboid with public source code, reproducible or source-checked
                 builds and signed reviews. The BiteCheck launcher loads <b>verified</b> jars without a question and warns
-                about everything else.</p>
+                about everything else. <a href="__REPO__/releases/latest">Download the launcher</a>
+                (Windows, macOS, Linux).</p>
                 <div class="bar"><input id="q" type="search" placeholder="Search by name, author or SHA-256 of a jar"
                 aria-label="Search"></div>
                 """);
+        h.replace(h.indexOf("__REPO__"), h.indexOf("__REPO__") + "__REPO__".length(), esc(repoUrl));
         if (!keyChecked) {
             h.append("<p class=\"empty\">The registry key is not set up yet, so no jar is verified.</p>\n");
         }

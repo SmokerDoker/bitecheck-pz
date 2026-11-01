@@ -4,7 +4,9 @@
 #   3. if registry/policy.toml sets ai_prereview = true: runs an AI pre-analysis of every new build
 #      (report for the human reviewer, signed by the registry; never an approval),
 #   4. publishes the signed launcher index to the "index" branch.
-# Secrets in the "registry-signing" environment: BITECHECK_REGISTRY_KEY, ANTHROPIC_API_KEY.
+# Environments: "registry-signing" holds BITECHECK_REGISTRY_KEY; "ai-review" holds the AI credential
+# (COPILOT_GITHUB_TOKEN, or ANTHROPIC_API_KEY with the repository variable AI_PREREVIEW_BACKEND=anthropic).
+# The model never runs in a job that has the registry key.
 name: Registry
 
 on:
@@ -162,21 +164,24 @@ jobs:
       tools_ref: ${{ github.sha }}
 
   analyze:
+    # Runs the model on untrusted mod files: no registry key here, only the AI credential.
     needs: [analysis-pending, build-ai]
     if: ${{ !cancelled() && needs.build-ai.result == 'success' }}
     runs-on: ubuntu-latest
-    environment: registry-signing
-    permissions:
-      contents: write
+    environment: ai-review
     strategy:
-      max-parallel: 1
+      max-parallel: 2
       fail-fast: false
       matrix:
         include: ${{ fromJSON(needs.analysis-pending.outputs.releases) }}
+    env:
+      BACKEND: ${{ vars.AI_PREREVIEW_BACKEND || 'copilot' }}
+      MODEL: ${{ vars.AI_PREREVIEW_MODEL || '' }}
     steps:
       - uses: actions/checkout@v4
         with:
           ref: main
+          persist-credentials: false
       - uses: actions/setup-java@v4
         with:
           distribution: temurin
@@ -206,28 +211,70 @@ jobs:
           case "$commit" in *[!0-9a-f]*|"") echo "::error::bad commit"; exit 1;; esac
           git init -q src && git -C src remote add origin "$source"
           git -C src fetch -q --depth 1 origin "$commit" && git -C src checkout -q FETCH_HEAD
+      - name: Install Copilot CLI
+        if: env.BACKEND == 'copilot'
+        run: npm install -g @github/copilot
       - name: AI pre-analysis
         env:
           RELEASE: ${{ matrix.release }}
+          COPILOT_GITHUB_TOKEN: ${{ secrets.COPILOT_GITHUB_TOKEN }}
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
         run: |
-          if [ -z "$ANTHROPIC_API_KEY" ]; then echo "::warning::ANTHROPIC_API_KEY is not set"; exit 1; fi
-          python3 -I .github/scripts/ai_prereview.py --release "$RELEASE" --src src --jars jars \
-            --bcz cli/build/install/bcz/bin/bcz --report out/report.md --result out/result.json \
-            --model claude-opus-5-5 --effort high
+          if [ "$BACKEND" = copilot ] && [ -z "$COPILOT_GITHUB_TOKEN" ]; then echo "::warning::COPILOT_GITHUB_TOKEN is not set"; exit 1; fi
+          if [ "$BACKEND" = anthropic ] && [ -z "$ANTHROPIC_API_KEY" ]; then echo "::warning::ANTHROPIC_API_KEY is not set"; exit 1; fi
+          model=(); [ -n "$MODEL" ] && model=(--model "$MODEL")
+          python3 -I .github/scripts/ai_prereview.py --backend "$BACKEND" "${model[@]}" --effort high \
+            --release "$RELEASE" --src src --jars jars --bcz cli/build/install/bcz/bin/bcz \
+            --report out/report.md --result out/result.json
           cat out/report.md >> "$GITHUB_STEP_SUMMARY"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: analysis-${{ matrix.key }}
+          path: out/
+          retention-days: 30
+
+  analysis-sign:
+    needs: [analysis-pending, analyze]
+    if: ${{ !cancelled() && needs.analysis-pending.outputs.releases != '[]' && needs.analysis-pending.outputs.releases != '' }}
+    runs-on: ubuntu-latest
+    environment: registry-signing
+    permissions:
+      contents: write
+    strategy:
+      max-parallel: 1
+      fail-fast: false
+      matrix:
+        include: ${{ fromJSON(needs.analysis-pending.outputs.releases) }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "21"
+      - name: Build bcz
+        run: ./gradlew --no-daemon -q :cli:installDist
+      - uses: actions/download-artifact@v4
+        id: report
+        continue-on-error: true # no artifact = this analysis failed; retried on the next run
+        with:
+          name: analysis-${{ matrix.key }}
+          path: out
       - name: Write, sign and commit the analysis record
+        if: steps.report.outcome == 'success'
         env:
           RELEASE: ${{ matrix.release }}
           REGISTRY_KEY: ${{ secrets.BITECHECK_REGISTRY_KEY }}
         run: |
+          get() { python3 -I -c 'import json,sys;print(json.load(open("out/result.json"))[sys.argv[1]])' "$1"; }
+          verdict=$(get verdict); summary=$(get summary); model=$(get model); effort=$(get effort)
+          case "$verdict" in no-concerns|concerns) ;; *) echo "::error::bad verdict"; exit 1;; esac
+          bcz=cli/build/install/bcz/bin/bcz
+          $bcz analysis-record "$RELEASE" --model "$model" --effort "$effort" --verdict "$verdict" \
+            --summary "$summary" --report out/report.md
           umask 077
           printf '%s\n' "$REGISTRY_KEY" > "$RUNNER_TEMP/registry.key"
-          bcz=cli/build/install/bcz/bin/bcz
-          verdict=$(python3 -c 'import json;print(json.load(open("out/result.json"))["verdict"])')
-          summary=$(python3 -c 'import json;print(json.load(open("out/result.json"))["summary"])')
-          $bcz analysis-record "$RELEASE" --model claude-opus-5-5 --effort high --verdict "$verdict" \
-            --summary "$summary" --report out/report.md
           record="${RELEASE%.toml}.analysis.toml"
           $bcz sign "$record" --key "$RUNNER_TEMP/registry.key"
           rm -f "$RUNNER_TEMP/registry.key"
@@ -240,7 +287,7 @@ jobs:
           git push -q origin HEAD:main
 
   index:
-    needs: [pending, sign, analyze]
+    needs: [pending, sign, analysis-sign]
     if: ${{ !cancelled() && needs.pending.result == 'success' && needs.sign.result != 'failure' }}
     runs-on: ubuntu-latest
     environment: registry-signing

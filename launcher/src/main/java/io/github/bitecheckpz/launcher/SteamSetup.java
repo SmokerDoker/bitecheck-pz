@@ -28,8 +28,13 @@ public final class SteamSetup {
     private SteamSetup() {
     }
 
-    /** The start script BiteCheck was started from (set by the scripts), or the expected one next to the jar. */
+    /** The installed program or start script BiteCheck was started from, or the expected script next to the jar. */
     public static Path script(Platform.Os os) {
+        // installed app (jpackage launcher: BiteCheck.exe, BiteCheck.app/Contents/MacOS/BiteCheck, /opt/bitecheck/bin/BiteCheck)
+        String appPath = System.getProperty("jpackage.app-path");
+        if (appPath != null && !appPath.isBlank()) {
+            return Path.of(appPath);
+        }
         String fromScript = System.getProperty("bitecheck.script");
         if (fromScript != null && !fromScript.isBlank()) {
             return Path.of(fromScript);
