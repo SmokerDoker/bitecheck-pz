@@ -11,7 +11,7 @@ The planned flow:
 1. Your mod's source code is public under a license that allows review and rebuilding (e.g. MIT, Apache 2.0, GPL).
 2. Your build is reproducible. The BiteCheck mod template / Gradle plugin sets this up for you.
 3. `bcz submit` opens a pull request in this repository with your signed release file. CI builds your mod twice, compares the hashes, runs the scanner and posts the results to the PR.
-4. Two independent reviewers approve it, then it is merged.
+4. CI runs an AI pre-analysis of the built jars, then a reviewer approves it (the number of approvals is set in `registry/policy.toml`).
 
 Requirements for a release:
 
@@ -58,6 +58,8 @@ Download the jar CI built (artifact `mod-<mod>-<version>` of the pull request's 
 bcz review registry/mods/<mod>/releases/<version>.toml mod.jar --reviewer <you> --verdict approve --notes "…"
 bcz sign registry/mods/<mod>/reviews/<version>/<you>.toml --key ~/.bitecheck/keys/<you>.key
 ```
+
+If the release has an AI pre-analysis (`<version>.analysis.md` next to the release), read it first and check every point it raises yourself. It is written by a language model from the mod's own files and can be wrong or misled; your review is what counts.
 
 A review must state what was checked (full review or diff to the previous version) and explain every soft scanner finding. If you find something malicious, **flag it immediately** — a critical flag removes the approval for all players until it is resolved.
 
