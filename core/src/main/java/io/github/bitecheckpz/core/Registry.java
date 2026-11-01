@@ -62,18 +62,6 @@ public final class Registry {
         return modDir(mod).resolve("releases").resolve(version + ".build.toml");
     }
 
-    /** The signed AI pre-analysis record of a release ({@code <version>.analysis.toml}). */
-    public Path analysisFile(String mod, String version) {
-        requireVersion(version);
-        return modDir(mod).resolve("releases").resolve(version + ".analysis.toml");
-    }
-
-    /** The full AI pre-analysis report ({@code <version>.analysis.md}), covered by the record's hash. */
-    public Path analysisReport(String mod, String version) {
-        requireVersion(version);
-        return modDir(mod).resolve("releases").resolve(version + ".analysis.md");
-    }
-
     public Path reviewsDir(String mod, String version) {
         requireVersion(version);
         return modDir(mod).resolve("reviews").resolve(version);
@@ -111,22 +99,14 @@ public final class Registry {
         return level == null ? "new" : level;
     }
 
-    /**
-     * How many reviews a release needs, and whether a signed AI pre-analysis of the exact build
-     * must exist as well ({@code ai_prereview}). The AI analysis never counts as an approval.
-     */
-    public record Policy(int requiredApprovals, int requiredTrusted, boolean aiPrereview) {
-        public static final Policy DEFAULT = new Policy(2, 1, false);
-
-        public Policy(int requiredApprovals, int requiredTrusted) {
-            this(requiredApprovals, requiredTrusted, false);
-        }
+    /** How many reviews a release needs. */
+    public record Policy(int requiredApprovals, int requiredTrusted) {
+        public static final Policy DEFAULT = new Policy(2, 1);
     }
 
     /**
-     * Review policy from registry/policy.toml ({@code required_approvals}, {@code required_trusted},
-     * {@code ai_prereview}). Defaults to 2 approvals incl. 1 trusted, no AI pre-analysis; values
-     * below 1 are raised to 1.
+     * Review policy from registry/policy.toml ({@code required_approvals}, {@code required_trusted}).
+     * Defaults to 2 approvals incl. 1 trusted; values below 1 are raised to 1.
      */
     public Policy policy() throws IOException, Toml.TomlException {
         Path file = root.resolve("registry").resolve("policy.toml");
@@ -138,7 +118,7 @@ public final class Registry {
         long trusted = doc.get("required_trusted") instanceof Long l ? l : Policy.DEFAULT.requiredTrusted();
         int a = (int) Math.max(1, Math.min(approvals, 10));
         int t = (int) Math.max(1, Math.min(trusted, a));
-        return new Policy(a, t, Boolean.TRUE.equals(doc.get("ai_prereview")));
+        return new Policy(a, t);
     }
 
     /** All jar hashes a build record vouches for: jar_sha256 and/or artifact_sha256 = [...]. */

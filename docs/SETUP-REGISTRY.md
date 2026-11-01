@@ -20,10 +20,6 @@ This writes `keys/registry.pub` (commit it) and `~/.bitecheck/keys/registry.key`
 2. Under **Deployment branches**, allow only `main`.
 3. Optional but recommended: add yourself as a **required reviewer**, so every signing run waits for your approval.
 4. In the environment, **Add secret** `BITECHECK_REGISTRY_KEY` and paste the full content of `registry.key` (all three lines).
-5. For the AI pre-analysis (`ai_prereview = true` in `registry/policy.toml`), create a second environment `ai-review` (deployment branch `main` only). It holds the AI credential and never the registry key, because the model reads untrusted mod files.
-   - **GitHub Copilot (default):** create a [fine-grained personal access token](https://github.com/settings/personal-access-tokens/new) with the account permission **Copilot Requests** and store it as secret `COPILOT_GITHUB_TOKEN` in `ai-review`. Each analysis uses requests from that account's Copilot plan (premium requests on the paid models). Optional repository variable `AI_PREREVIEW_MODEL` picks the model (e.g. a Claude model your plan offers); empty = Copilot's default.
-   - **Claude API (alternative):** set the repository variable `AI_PREREVIEW_BACKEND = anthropic` and store `ANTHROPIC_API_KEY` in `ai-review` (model `claude-opus-5-5`, effort `high`; set a spend limit in the Claude Console).
-   At most 10 analyses run per workflow run; failed ones are retried on the next run.
 
 ## 3. Commit the public key
 
@@ -48,7 +44,7 @@ Reviewers are added with a public key in `keys/reviewers/<name>.pub` and an entr
 level = "trusted"   # new | reviewer | trusted
 ```
 
-How many approvals a release needs is set in `registry/policy.toml`. The start-up policy is one approval from a `trusted` reviewer plus a signed AI pre-analysis of the exact build; raise `required_approvals` to 2 once there are more reviewers.
+How many approvals a release needs is set in `registry/policy.toml`. The start-up policy is one approval from a `trusted` reviewer; later two (a newcomer plus a reviewer with a higher level).
 
 ## Rotating a compromised key
 

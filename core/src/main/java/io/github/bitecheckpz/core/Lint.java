@@ -69,9 +69,6 @@ public final class Lint {
                         error(policy, key + " must be a number from 1 to 10");
                     }
                 }
-                if (doc.containsKey("ai_prereview") && !(doc.get("ai_prereview") instanceof Boolean)) {
-                    error(policy, "ai_prereview must be true or false");
-                }
             }
         }
         Path mods = root.resolve("registry/mods");
@@ -177,12 +174,6 @@ public final class Lint {
                     }
                 } else if (name.endsWith(".build.toml")) {
                     checkBuild(f, mod);
-                } else if (name.endsWith(".analysis.toml")) {
-                    checkAnalysis(f, mod);
-                } else if (name.endsWith(".analysis.md")) {
-                    if (!Files.isRegularFile(f.resolveSibling(name.replace(".analysis.md", ".analysis.toml")))) {
-                        error(f, "analysis report without an analysis record");
-                    }
                 } else if (name.endsWith(".toml")) {
                     checkRelease(f, mod, unsigned, authorKey);
                 } else {
@@ -265,43 +256,6 @@ public final class Lint {
             Signatures.Check sig = Signatures.verify(f, authorKey.get());
             if (sig != Signatures.Check.VALID) {
                 error(f, "publisher signature: " + sig.description());
-            }
-        }
-    }
-
-    private void checkAnalysis(Path f, String mod) {
-        Map<String, Object> doc = parse(f);
-        if (doc == null) {
-            return;
-        }
-        if (!mod.equals(Toml.string(doc, "mod"))) {
-            error(f, "mod must be \"" + mod + "\"");
-        }
-        for (String key : List.of("build_sha256", "report_sha256")) {
-            if (!Hashing.isSha256Hex(Toml.string(doc, key))) {
-                error(f, key + " must be a SHA-256 hash");
-            }
-        }
-        if (!Records.ANALYSIS_VERDICTS.contains(Toml.string(doc, "verdict"))) {
-            error(f, "verdict must be one of " + Records.ANALYSIS_VERDICTS);
-        }
-        String name = f.getFileName().toString();
-        Path report = f.resolveSibling(name.replace(".analysis.toml", ".analysis.md"));
-        if (!Files.isRegularFile(report)) {
-            error(f, "report " + report.getFileName() + " is missing");
-        } else {
-            try {
-                if (!Hashing.sha256Hex(report).equals(Toml.string(doc, "report_sha256"))) {
-                    error(f, "report_sha256 does not match " + report.getFileName());
-                }
-            } catch (IOException e) {
-                error(f, "cannot read " + report.getFileName());
-            }
-        }
-        if (registryKey.isPresent()) {
-            Signatures.Check sig = Signatures.verify(f, registryKey.get());
-            if (sig != Signatures.Check.VALID) {
-                error(f, "registry signature: " + sig.description());
             }
         }
     }

@@ -53,9 +53,6 @@ public final class Main {
                          [--scope full|diff] [--notes <text>]
                   Write a review file for one jar, or without a jar for the whole build record.
                   Sign it with 'bcz sign' afterwards.
-              bcz analysis-record <release.toml> --model <id> --effort <level> --verdict no-concerns|concerns|failed
-                         --summary <text> --report <file.md>
-                  Write the AI pre-analysis record for a release's build (CI; signed by the registry).
               bcz source-check <jar> <source-dir>
                   Check that every class in a jar is declared in the source code. Exit 15 if not.
               bcz verify <jar> [--registry <dir>] [--registry-key <public-key>]
@@ -103,7 +100,6 @@ public final class Main {
                 case "verify-sig" -> verifySig(parsed, out);
                 case "build-record" -> buildRecord(parsed, out);
                 case "review" -> review(parsed, out);
-                case "analysis-record" -> analysisRecord(parsed, out);
                 case "verify" -> verify(parsed, out, err);
                 case "scan" -> scan(parsed, out);
                 case "lint" -> lint(parsed, out);
@@ -188,15 +184,6 @@ public final class Main {
         Path file = Records.writeReview(release, jar, a.requiredOption("reviewer"), a.requiredOption("verdict"),
                 a.option("scope").orElse("full"), a.option("notes").orElse(""));
         out.println("Wrote " + file + " - now sign it: bcz sign " + file + " --key <your key>");
-        return OK;
-    }
-
-    private static int analysisRecord(Args a, PrintStream out)
-            throws IOException, Toml.TomlException, UsageException {
-        Path release = Path.of(a.positional(0, "release.toml"));
-        Path file = Records.writeAnalysis(release, a.requiredOption("model"), a.option("effort").orElse(""),
-                a.requiredOption("verdict"), a.option("summary").orElse(""), Path.of(a.requiredOption("report")));
-        out.println("Wrote " + file + " - sign it with the registry key.");
         return OK;
     }
 
