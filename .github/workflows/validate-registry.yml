@@ -41,7 +41,7 @@ jobs:
                   print(f"ERROR {path}: {e}")
           sys.exit(1 if errors else 0)
           EOF
-      - uses: actions/setup-java@v4
+      - uses: actions/setup-java@v5
         with:
           distribution: temurin
           java-version: "21"

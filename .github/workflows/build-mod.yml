@@ -52,7 +52,7 @@ jobs:
           ref: ${{ inputs.registry_ref }}
           path: registry
           persist-credentials: false
-      - uses: actions/setup-java@v4
+      - uses: actions/setup-java@v5
         with:
           distribution: temurin
           java-version: "21"
@@ -65,7 +65,7 @@ jobs:
         run: tools/cli/build/install/bcz/bin/bcz release-info "registry/$RELEASE" --registry registry >> "$GITHUB_OUTPUT"
       - name: Set up the mod's JDK
         if: steps.info.outputs.type == 'rebuild'
-        uses: actions/setup-java@v4
+        uses: actions/setup-java@v5
         with:
           distribution: ${{ steps.info.outputs.jdk_distribution }}
           java-version: ${{ steps.info.outputs.jdk_version }}
