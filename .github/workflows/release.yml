@@ -1,32 +1,123 @@
-# Tag v0.1.0 (etc.) to publish the launcher and bcz downloads as a GitHub release.
+# Builds the downloads: the portable launcher zip, the bcz tool and native installers for
+# Windows (.msi), macOS (.dmg, Apple Silicon and Intel) and Linux (.deb, .rpm).
+#   - tag v0.1.0 (etc.): publishes everything as a GitHub release (pre-release if the tag has a "-")
+#   - "Run workflow" by hand: builds everything as workflow artifacts only, for testing
 name: Release
 
 on:
   push:
     tags: ["v*"]
+  workflow_dispatch:
 
 permissions:
-  contents: write
+  contents: read
 
 jobs:
-  release:
+  build:
     runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.version.outputs.version }}
     steps:
       - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
       - uses: actions/setup-java@v4
         with:
           distribution: temurin
           java-version: "21"
+      - id: version
+        run: |
+          if [[ "$GITHUB_REF" == refs/tags/v* ]]; then v="${GITHUB_REF_NAME#v}"; else v="0.0.0-dev.${GITHUB_RUN_NUMBER}"; fi
+          echo "version=$v" >> "$GITHUB_OUTPUT"
       - name: Build
         run: |
-          version="${GITHUB_REF_NAME#v}"
-          ./gradlew --no-daemon check :launcher:launcherZip :cli:distZip -PbitecheckVersion="$version"
-      - name: Checksums
+          ./gradlew --no-daemon check :launcher:launcherZip :launcher:fatJar :cli:distZip \
+            -PbitecheckVersion="${{ steps.version.outputs.version }}"
+          test -f keys/registry.pub || echo "::warning::keys/registry.pub is missing: this launcher cannot verify any mod"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: portable
+          path: |
+            launcher/build/libs/BiteCheck.jar
+            launcher/build/distributions/*.zip
+            cli/build/distributions/*.zip
+
+  installers:
+    needs: build
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { os: windows-2022, type: msi, label: windows-x64 }
+          - { os: macos-14, type: dmg, label: macos-arm64 }
+          - { os: macos-15-intel, type: dmg, label: macos-x64 }
+          - { os: ubuntu-22.04, type: deb, label: linux-x64 }
+          - { os: ubuntu-22.04, type: rpm, label: linux-x64 }
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "21"
+      - uses: actions/download-artifact@v4
+        with:
+          name: portable
+          path: portable
+      - name: Install packaging tools
+        shell: bash
+        run: |
+          case "${{ matrix.type }}" in
+            deb) sudo apt-get update -q && sudo apt-get install -y -q fakeroot ;;
+            rpm) sudo apt-get update -q && sudo apt-get install -y -q rpm ;;
+            msi)
+              # jpackage needs the WiX Toolset 3 (candle.exe, light.exe)
+              if ! command -v candle.exe >/dev/null; then
+                wix="$(ls -d "/c/Program Files (x86)/WiX Toolset v3"*/bin 2>/dev/null | head -n 1 || true)"
+                if [ -z "$wix" ]; then choco install wixtoolset -y --no-progress; wix="$(ls -d "/c/Program Files (x86)/WiX Toolset v3"*/bin | head -n 1)"; fi
+                echo "$wix" >> "$GITHUB_PATH"
+              fi
+              ;;
+          esac
+      - name: Build the installer
+        shell: bash
+        run: |
+          bash scripts/package-installer.sh portable/launcher/build/libs/BiteCheck.jar "${{ needs.build.outputs.version }}" \
+            "${{ matrix.type }}" out
+          cd out
+          for f in *; do
+            ext="${f##*.}"
+            mv "$f" "BiteCheck-${{ needs.build.outputs.version }}-${{ matrix.label }}.$ext"
+          done
+          ls -la
+      - uses: actions/upload-artifact@v4
+        with:
+          name: installer-${{ matrix.label }}-${{ matrix.type }}
+          path: out/*
+
+  publish:
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: [build, installers]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+      - name: Collect and checksum
         run: |
           mkdir dist
-          cp launcher/build/distributions/*.zip cli/build/distributions/*.zip dist/
-          cd dist && sha256sum *.zip > SHA256SUMS.txt
+          find artifacts -type f \( -name '*.zip' -o -name '*.msi' -o -name '*.dmg' -o -name '*.deb' -o -name '*.rpm' \) -exec cp {} dist/ \;
+          cd dist && sha256sum * > SHA256SUMS.txt && cat SHA256SUMS.txt
       - name: Publish
         env:
           GH_TOKEN: ${{ github.token }}
-        run: gh release create "$GITHUB_REF_NAME" dist/* --title "BiteCheck $GITHUB_REF_NAME" --generate-notes
+          REPO: ${{ github.repository }}
+        run: |
+          pre=()
+          [[ "$GITHUB_REF_NAME" == *-* ]] && pre=(--prerelease)
+          gh release create "$GITHUB_REF_NAME" dist/* --repo "$REPO" --title "BiteCheck $GITHUB_REF_NAME" \
+            --generate-notes "${pre[@]}"

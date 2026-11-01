@@ -14,6 +14,13 @@ Requirements
   - Project Zomboid (Build 42) from Steam
   - ZombieBuddy installed (https://github.com/zed-0xff/ZombieBuddy)
 
+Installers
+  Instead of this zip you can use the installer for your system from
+  https://github.com/SmokerDoker/bitecheck-pz/releases/latest
+  (Windows .msi, macOS .dmg, Linux .deb/.rpm). They bring their own Java.
+  The installed program works like the start scripts below, e.g. on Windows
+  "BiteCheck.exe" (window) and "BiteCheckConsole.exe --status" (command line).
+
 Start
   Windows:  double-click BiteCheck.bat
   macOS:    double-click BiteCheck.command

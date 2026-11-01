@@ -29,6 +29,21 @@ BiteCheck works together with [ZombieBuddy](https://github.com/zed-0xff/ZombieBu
 
 Under the hood BiteCheck writes allow/deny decisions per jar hash into ZombieBuddy's `~/.zombie_buddy/mod_approvals.json` and never touches anything else. To check your mods every time you press Play in Steam, put BiteCheck into the game's launch options (the launcher's "Steam setup…" button shows the exact line, e.g. `"…\BiteCheck.bat" --wrap %command% -agentlib:zbNative --`). Without it, ZombieBuddy's own questions still protect you. Dedicated servers run BiteCheck the same way before the server starts, see [docs/SERVER.md](docs/SERVER.md). The launcher runs on Windows, macOS and Linux with the Java runtime that comes with Project Zomboid; no separate Java install is needed.
 
+## Download
+
+Installers and the portable zip are on the [Releases page](https://github.com/SmokerDoker/bitecheck-pz/releases/latest):
+
+| System | File | Note |
+| --- | --- | --- |
+| Windows 10/11 | `BiteCheck-<version>-windows-x64.msi` | installs for your user only, no admin rights; SmartScreen warns once (not code-signed yet) |
+| macOS, Apple Silicon | `BiteCheck-<version>-macos-arm64.dmg` | not notarized yet: open once via System Settings → Privacy & Security → "Open anyway" |
+| macOS, Intel | `BiteCheck-<version>-macos-x64.dmg` | same |
+| Linux (Debian/Ubuntu) | `BiteCheck-<version>-linux-x64.deb` | installs to `/opt/bitecheck` |
+| Linux (Fedora/openSUSE) | `BiteCheck-<version>-linux-x64.rpm` | |
+| Any, incl. Steam Deck | `BiteCheck-<version>.zip` | portable, uses Project Zomboid's own Java |
+
+The installers bring their own small Java runtime. `SHA256SUMS.txt` on the release lists the hashes of all files; every build is made by GitHub Actions from the tagged commit (`release.yml`).
+
 ## How it works for modders
 
 Submitting a mod should be no harder than publishing to the Workshop:
@@ -50,6 +65,8 @@ Your mod is never blocked while it waits for review: players can load it as an u
 - [x] Test kit with three harmless test mods (`scripts/make-test-kit.sh`)
 - [x] Steam launch options integration (`--wrap %command%`) and dedicated server mode ([docs/SERVER.md](docs/SERVER.md))
 - [x] Registry website generated from the registry files (`bcz site`, GitHub Pages)
+- [x] Installers for Windows, macOS and Linux built by GitHub Actions (`release.yml`)
+- [x] Start-up policy: one trusted review plus a signed AI pre-analysis (Copilot or Claude API)
 - [x] First three mods prepared as pending entries with preliminary reviews ([docs/reviews](docs/reviews/README.md))
 - [ ] First test with real players
 - [ ] Registry key set up ([docs/SETUP-REGISTRY.md](docs/SETUP-REGISTRY.md)) and first real mods
@@ -101,7 +118,7 @@ keys/            Public keys of the registry, authors and reviewers
 | `submission.yml` | PRs adding a release | builds the mod twice on different runners, compares hashes, scans the jar |
 | `registry.yml` | merges to main, daily | rebuilds new releases, signs build records, publishes the signed index |
 | `site.yml` | registry changes, after `registry.yml` | registry website on GitHub Pages |
-| `release.yml` | tags `v*` | GitHub release with launcher and bcz downloads |
+| `release.yml` | tags `v*`, by hand | installers (msi, dmg, deb, rpm), portable zip and bcz; a tag publishes them as a GitHub release |
 
 Run the tests with `./gradlew check`.
 
