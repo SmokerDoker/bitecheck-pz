@@ -46,7 +46,8 @@ final class AccountCommands {
     private static final Pattern GITHUB_REPO =
             Pattern.compile("github\\.com[:/]([A-Za-z0-9-]+)/([A-Za-z0-9._-]+?)(?:\\.git)?/?$");
     private static final List<String> BUILD_KEYS =
-            List.of("type", "jdk", "gradle", "command", "artifact", "artifacts", "game_branch");
+            List.of("type", "jdk", "gradle", "command", "artifact", "artifacts", "game_branch", "workshop_id",
+                    "workshop_artifacts");
 
     private AccountCommands() {
     }
@@ -279,6 +280,10 @@ final class AccountCommands {
             throw new IOException(registry.root().relativize(buildFile) + ": " + check.description());
         }
         Map<String, Object> build = registry.read(buildFile);
+        if ("workshop".equals(Toml.string(build, "method"))) {
+            out.println(id + " " + version + ": players get the verified jar from the Steam Workshop, nothing to fetch");
+            return Main.OK;
+        }
         List<String> paths = Releases.artifacts(registry.read(registry.releaseFile(id, version)));
         List<String> hashes = new ArrayList<>();
         if ("published".equals(Toml.string(build, "method")) && build.get("artifact_sha256") instanceof List<?> list) {

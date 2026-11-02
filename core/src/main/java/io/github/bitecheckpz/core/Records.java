@@ -27,7 +27,9 @@ public final class Records {
 
     /**
      * Writes the build record for one or more jars. For a "published" release, pass the jars in
-     * the order of the release's {@code artifacts} list; they are recorded with their paths.
+     * the order of the release's {@code artifacts} list; they are recorded with their paths. For a
+     * "workshop" release, pass the Workshop item's jars in the order of {@code workshop_artifacts},
+     * after checking that they contain exactly what CI built.
      */
     public static Path writeBuildRecord(Path releaseFile, List<Path> jars, List<String> builders)
             throws IOException, Toml.TomlException {
@@ -40,8 +42,10 @@ public final class Records {
             throw new IllegalArgumentException("release file must be named " + version + ".toml");
         }
         Map<String, Object> build = Toml.table(release, "build");
-        boolean published = "published".equals(Toml.string(build, "type"));
-        List<String> paths = Releases.artifacts(release);
+        String type = Toml.string(build, "type");
+        boolean workshop = "workshop".equals(type);
+        boolean published = "published".equals(type) || workshop;
+        List<String> paths = workshop ? Releases.workshopArtifacts(release) : Releases.artifacts(release);
         if (jars.isEmpty() || (published && jars.size() != paths.size()) || (!published && jars.size() != 1)) {
             throw new IllegalArgumentException(published
                     ? "pass one jar per artifact (" + paths.size() + ") in the release's order"
@@ -51,7 +55,8 @@ public final class Records {
         out.append("# Build record written by CI. Signed by the registry key.\n");
         out.append("mod = ").append(Toml.quote(mod)).append('\n');
         out.append("version = ").append(Toml.quote(version)).append('\n');
-        out.append("method = ").append(Toml.quote(published ? "published" : "rebuild")).append('\n');
+        out.append("method = ").append(Toml.quote(workshop ? "workshop" : published ? "published" : "rebuild"))
+                .append('\n');
         out.append("release_sha256 = ").append(Toml.quote(Hashing.sha256Hex(releaseFile))).append('\n');
         if (published) {
             out.append("artifact_paths = ").append(array(paths)).append('\n');

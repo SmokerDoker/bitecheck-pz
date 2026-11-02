@@ -201,6 +201,7 @@ public final class Site {
             for (ReleaseRow r : m.releases()) {
                 h.append("<h3>").append(esc(r.version())).append(" <span class=\"meta\">· ")
                         .append("published".equals(r.type()) ? "published jars, reviewed against source"
+                                : "workshop".equals(r.type()) ? "Steam Workshop jars, rebuilt from source by CI"
                                 : "rebuilt by CI")
                         .append(" · commit <code>").append(esc(shortCommit(r.commit()))).append("</code></span></h3>\n");
                 h.append("<div class=\"scroll\"><table><tr><th>Jar</th><th>SHA-256</th><th>Status</th></tr>\n");

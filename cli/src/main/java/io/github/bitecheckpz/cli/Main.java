@@ -90,6 +90,8 @@ public final class Main {
                   Sign it with 'bcz sign' afterwards.
               bcz source-check <jar> <source-dir>
                   Check that every class in a jar is declared in the source code. Exit 15 if not.
+              bcz jar-compare <built.jar> <workshop.jar>
+                  CI, workshop releases: both jars have the same files (manifest aside). Exit 1 if not.
               bcz verify <jar> [--registry <dir>] [--registry-key <public-key>]
                   Check a mod jar against the registry.
                   Exit codes: 0 verified, 10 unverified, 11 flagged, 12 blocked, 13 invalid.
@@ -141,6 +143,7 @@ public final class Main {
                 case "index" -> index(parsed, out);
                 case "release-info" -> releaseInfo(parsed, out);
                 case "source-check" -> sourceCheck(parsed, out);
+                case "jar-compare" -> jarCompare(parsed, out);
                 case "site" -> site(parsed, out);
                 case "status" -> ModCommands.status(parsed, out);
                 case "inspect" -> ModCommands.inspect(parsed, out);
@@ -359,7 +362,9 @@ public final class Main {
         Registry.requireVersion(version);
         var modInfo = Toml.parse(registry.modDir(mod).resolve("mod.toml"));
         var build = Toml.table(release, "build");
-        boolean published = "published".equals(Toml.string(build, "type"));
+        String type = Toml.string(build, "type");
+        boolean published = "published".equals(type);
+        boolean workshop = "workshop".equals(type);
         List<String> artifacts = io.github.bitecheckpz.core.Releases.artifacts(release);
         if (artifacts.isEmpty() || !artifacts.stream().allMatch(io.github.bitecheckpz.core.Releases::isSafeArtifactPath)) {
             throw new IllegalArgumentException("release artifacts are missing or invalid");
@@ -367,7 +372,7 @@ public final class Main {
         List<String> values = new ArrayList<>(List.of(
                 "mod", mod,
                 "version", version,
-                "type", published ? "published" : "rebuild",
+                "type", published ? "published" : workshop ? "workshop" : "rebuild",
                 "source", String.valueOf(Toml.string(modInfo, "source")),
                 "commit", String.valueOf(Toml.string(release, "commit")),
                 "artifacts", String.join(" ", artifacts)));
@@ -386,6 +391,16 @@ public final class Main {
                     "command", String.valueOf(Toml.string(build, "command")),
                     "game_branch", branch));
         }
+        if (workshop) {
+            List<String> inItem = io.github.bitecheckpz.core.Releases.workshopArtifacts(release);
+            String id = String.valueOf(Toml.string(build, "workshop_id"));
+            if (inItem.size() != artifacts.size()
+                    || !inItem.stream().allMatch(io.github.bitecheckpz.core.Releases::isSafeArtifactPath)
+                    || !id.matches("[0-9]{1,20}")) {
+                throw new IllegalArgumentException("[build] workshop_id or workshop_artifacts are missing or invalid");
+            }
+            values.addAll(List.of("workshop_id", id, "workshop_artifacts", String.join(" ", inItem)));
+        }
         for (int i = 0; i < values.size(); i += 2) {
             String value = values.get(i + 1);
             if (value == null || value.isBlank() || value.equals("null") || value.contains("\n")
@@ -398,6 +413,18 @@ public final class Main {
             throw new IllegalArgumentException("commit must be a full 40-character hash");
         }
         return OK;
+    }
+
+    private static int jarCompare(Args a, PrintStream out) throws IOException, UsageException {
+        Path built = Path.of(a.positional(0, "built.jar"));
+        Path other = Path.of(a.positional(1, "workshop.jar"));
+        List<String> differences = io.github.bitecheckpz.core.JarCompare.differences(built, other);
+        if (differences.isEmpty()) {
+            out.println("Same files: " + other.getFileName() + " contains exactly what was built");
+            return OK;
+        }
+        differences.forEach(d -> out.println("  " + d));
+        return ERROR;
     }
 
     private static int sourceCheck(Args a, PrintStream out) throws IOException, UsageException {

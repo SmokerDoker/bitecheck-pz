@@ -200,9 +200,21 @@ final class ModCommands {
                     : soft ? "Next: " + approve + " --notes \"why the findings are fine\""
                     : "Next: " + approve);
         } else {
-            out.println("  CI builds this jar; run 'bcz scan' on the jar of the 'Mod submission' run.");
+            String key = (t.mod + "-" + t.version).replaceAll("[^A-Za-z0-9.-]", "-");
+            Map<String, Object> build = Toml.table(t.release, "build");
+            if ("workshop".equals(Toml.string(build, "type"))) {
+                out.println("  Players get the jar from Workshop item " + Toml.string(build, "workshop_id")
+                        + "; CI rebuilds it from this source and checks that both have the same files.");
+                out.println("  Review the build files too: the build command runs them.");
+                out.println("  The Workshop jar and its scan: 'Mod submission' or 'Registry' run, artifact mod-" + key);
+            } else {
+                out.println("  CI builds this jar; run 'bcz scan' on the jar of the 'Mod submission' run (artifact mod-"
+                        + key + ").");
+            }
             out.println();
-            out.println("Next: bcz approve " + t.mod + (base != null ? " --scope diff" : ""));
+            out.println("pending".equals(Toml.string(t.modInfo, "status"))
+                    ? "Next: bcz publish " + t.mod + " (publisher), then after CI: bcz approve " + t.mod
+                    : "Next: bcz approve " + t.mod + (base != null ? " --scope diff" : ""));
         }
         return result;
     }

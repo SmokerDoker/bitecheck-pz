@@ -260,10 +260,11 @@ public final class Lint {
         }
         Map<String, Object> build = Toml.table(doc, "build");
         String type = Toml.string(build, "type");
-        if (type != null && !type.equals("rebuild") && !type.equals("published")) {
-            error(f, "[build] type must be rebuild or published");
+        if (type != null && !type.equals("rebuild") && !type.equals("published") && !type.equals("workshop")) {
+            error(f, "[build] type must be rebuild, published or workshop");
         }
         boolean published = "published".equals(type);
+        boolean workshop = "workshop".equals(type);
         List<String> artifacts = Releases.artifacts(doc);
         if (artifacts.isEmpty()) {
             error(f, "[build] needs artifact (or artifacts = [...] for a published release)");
@@ -279,8 +280,23 @@ public final class Lint {
                     error(f, "[build] needs " + key);
                 }
             }
-            if (artifacts.size() > 1) {
+            if (artifacts.size() > 1 && !workshop) {
                 error(f, "a rebuild release has exactly one artifact");
+            }
+        }
+        if (workshop) {
+            String id = Toml.string(build, "workshop_id");
+            if (id == null || !id.matches("[0-9]{1,20}")) {
+                error(f, "[build] workshop_id must be the Steam Workshop item id");
+            }
+            List<String> inItem = Releases.workshopArtifacts(doc);
+            if (inItem.size() != artifacts.size()) {
+                error(f, "[build] workshop_artifacts needs one path inside the Workshop item per artifact");
+            }
+            for (String path : inItem) {
+                if (!Releases.isSafeArtifactPath(path)) {
+                    error(f, "[build] workshop_artifacts '" + path + "' must be a relative .jar path without spaces or '..'");
+                }
             }
         }
         String jdk = Toml.string(build, "jdk");

@@ -25,9 +25,11 @@ import java.util.stream.Stream;
  *   <li>there is no open critical flag for this hash, and the entry is not pending.</li>
  * </ol>
  *
- * <p>Build records come in two kinds ({@code method}): "rebuild" - CI built the jar from source
- * twice and got identical bytes - and "published" - CI took the jar the author published in the
- * source repository at the release commit, and reviewers checked it against the source.
+ * <p>Build records come in three kinds ({@code method}): "rebuild" - CI built the jar from source
+ * twice and got identical bytes -, "published" - CI took the jar the author published in the
+ * source repository at the release commit, and reviewers checked it against the source - and
+ * "workshop" - the jar from the Steam Workshop item, whose files CI rebuilt byte-identical from
+ * the source twice.
  */
 public final class Verifier {
 
@@ -145,10 +147,13 @@ public final class Verifier {
             messages.add("build record: registry " + buildSig.description());
             return new Result(Status.INVALID, sha, mod, version, messages);
         }
-        String method = "published".equals(Toml.string(build, "method")) ? "published" : "rebuild";
-        messages.add(method.equals("published")
-                ? "published binary, build record signed by the registry"
-                : "reproducible build record signed by the registry");
+        String method = Optional.ofNullable(Toml.string(build, "method"))
+                .filter(m -> m.equals("published") || m.equals("workshop")).orElse("rebuild");
+        messages.add(switch (method) {
+            case "published" -> "published binary, build record signed by the registry";
+            case "workshop" -> "Steam Workshop jar, rebuilt from source by CI, build record signed by the registry";
+            default -> "reproducible build record signed by the registry";
+        });
 
         try {
             // 2. Release file unchanged and signed by the author.

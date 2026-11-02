@@ -111,7 +111,8 @@ public final class Index {
             for (String sha : Registry.jarHashes(registry.read(buildFile))) {
                 Verifier.Result r = verifier.verifyHash(sha);
                 String label = r.mod() + " " + r.version()
-                        + ("published".equals(r.method()) ? " (published binary, reviewed against source)" : "");
+                        + ("published".equals(r.method()) ? " (published binary, reviewed against source)"
+                                : "workshop".equals(r.method()) ? " (Steam Workshop jar, rebuilt from source)" : "");
                 switch (r.status()) {
                     case VERIFIED -> verified.put(sha, label);
                     case FLAGGED -> flagged.put(sha, label + ": " + lastMessage(r));
