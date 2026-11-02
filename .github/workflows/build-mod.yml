@@ -100,6 +100,11 @@ jobs:
             echo "::error::[build] game_branch may only contain letters, digits, '-', '_' and '.'"
             exit 1
           fi
+          # Build 41 has no projectzomboid.jar (loose classes), and ZombieBuddy needs Build 42+
+          if [ "$branch" = legacy41 ]; then
+            echo "::error::Build 41 (game_branch legacy41) is not supported: ZombieBuddy needs Build 42 or newer"
+            exit 1
+          fi
           echo "branch=$branch" >> "$GITHUB_OUTPUT"
       - name: Download the game jar
         id: game
