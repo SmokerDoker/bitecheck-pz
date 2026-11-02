@@ -2,6 +2,7 @@ package io.github.bitecheckpz.cli;
 
 import io.github.bitecheckpz.cli.Main.Args;
 import io.github.bitecheckpz.cli.Main.UsageException;
+import io.github.bitecheckpz.core.Hashing;
 import io.github.bitecheckpz.core.Keys;
 import io.github.bitecheckpz.core.Records;
 import io.github.bitecheckpz.core.Registry;
@@ -71,7 +72,7 @@ final class ModCommands {
         if (source == null || !source.startsWith("https://") || commit == null || !commit.matches("[0-9a-f]{40}")) {
             throw new IOException(t.mod + ": source or commit missing or invalid");
         }
-        Path dir = home().resolve("review").resolve(t.mod + "-" + t.version);
+        Path dir = reviewDir(t);
         if (!Files.isDirectory(dir.resolve(".git"))) {
             Files.createDirectories(dir.getParent());
             git(null, "clone", "--quiet", "--", source, dir.toString());
@@ -79,9 +80,7 @@ final class ModCommands {
         if (git(dir, "cat-file", "-e", commit + "^{commit}") != 0) {
             git(dir, "fetch", "--quiet", "origin");
         }
-        if (git(dir, "-c", "advice.detachedHead=false", "checkout", "--quiet", "--force", commit) != 0) {
-            throw new IOException("cannot check out " + commit + " in " + dir);
-        }
+        git(dir, "-c", "advice.detachedHead=false", "checkout", "--quiet", "--force", commit);
         out.println(t.mod + " " + t.version + "  (" + source.replaceFirst("^https://github\\.com/", "") + " @ "
                 + commit.substring(0, 7) + ")");
         out.println("Source: " + dir);
@@ -97,6 +96,7 @@ final class ModCommands {
             int width = names.stream().mapToInt(String::length).max().orElse(0);
             Map<String, Scanner.Severity> findings = new java.util.LinkedHashMap<>();
             boolean soft = false;
+            int matching = 0;
             for (int i = 0; i < artifacts.size(); i++) {
                 String artifact = artifacts.get(i);
                 String name = String.format("%-" + width + "s", names.get(i));
@@ -109,6 +109,7 @@ final class ModCommands {
                 Scanner.Report report = Scanner.scan(jar);
                 SourceCheck.Result src = SourceCheck.check(jar, dir);
                 boolean inBuild = built.isEmpty() || built.contains(report.jarSha256());
+                matching += built.contains(report.jarSha256()) ? 1 : 0;
                 long hard = report.count(Scanner.Severity.HARD);
                 long softCount = report.count(Scanner.Severity.SOFT);
                 boolean bad = hard > 0 || !src.ok() || !inBuild;
@@ -130,6 +131,16 @@ final class ModCommands {
                     result = 15;
                 }
             }
+            out.println();
+            if (built.isEmpty()) {
+                out.println("SHA-256: no build record yet, so nothing to compare. CI writes it after 'bcz publish';");
+                out.println("         'bcz approve' compares these jars with it before signing.");
+            } else if (matching == artifacts.size()) {
+                out.println("SHA-256: all " + matching + " jars match the build record signed by CI");
+            } else {
+                out.println("SHA-256: only " + matching + " of " + artifacts.size()
+                        + " jars match the build record - do not approve");
+            }
             if (!findings.isEmpty()) {
                 out.println();
                 out.println("Findings (explain each one in your review):");
@@ -137,7 +148,9 @@ final class ModCommands {
                         ? "!!" : "??") + "  " + text));
             }
             out.println();
-            out.println(result != Main.OK
+            out.println(!built.isEmpty() && matching != artifacts.size()
+                    ? "Do not approve: bcz reject " + t.mod + " --notes \"jars do not match the build record\""
+                    : result != Main.OK
                     ? "Check the !! lines, then: bcz approve " + t.mod + "  or  bcz reject " + t.mod + " --notes \"why\""
                     : soft ? "Next: bcz approve " + t.mod + " --notes \"why the findings are fine\""
                     : "Next: bcz approve " + t.mod);
@@ -192,6 +205,24 @@ final class ModCommands {
         if (!Files.isRegularFile(t.registry.buildFile(t.mod, t.version))) {
             throw new IOException("no build record for " + t.mod + " " + t.version
                     + " yet; CI writes it after the release is pushed. Run 'git pull' and try again.");
+        }
+        if ("published".equals(Toml.string(Toml.table(t.release, "build"), "type"))) {
+            // The review signs the build record; make sure it lists exactly the jars you inspected.
+            Path dir = reviewDir(t);
+            if (!Files.isDirectory(dir.resolve(".git"))) {
+                throw new IOException("run 'bcz inspect " + t.mod + "' first");
+            }
+            List<String> built = Registry.jarHashes(t.registry.read(t.registry.buildFile(t.mod, t.version)));
+            List<String> artifacts = Releases.artifacts(t.release);
+            for (String artifact : artifacts) {
+                Path jar = dir.resolve(artifact).normalize();
+                if (!Releases.isSafeArtifactPath(artifact) || !jar.startsWith(dir) || !Files.isRegularFile(jar)
+                        || !built.contains(Hashing.sha256Hex(jar))) {
+                    throw new IOException(artifact + " does not match the build record - do not approve; "
+                            + "run 'bcz inspect " + t.mod + "' again and report it");
+                }
+            }
+            out.println("SHA-256: all " + artifacts.size() + " jars match the build record signed by CI");
         }
         var publicKey = t.registry.reviewerKey(me)
                 .orElseThrow(() -> new IOException("no keys/reviewers/" + me + ".pub in the registry"));
@@ -331,6 +362,11 @@ final class ModCommands {
         return 0;
     }
 
+    /** Where 'bcz inspect' checks out a release's source. */
+    private static Path reviewDir(Target t) {
+        return home().resolve("review").resolve(t.mod + "-" + t.version);
+    }
+
     private static Path home() {
         return Path.of(System.getProperty("user.home"), ".bitecheck");
     }
@@ -380,14 +416,14 @@ final class ModCommands {
         command.addAll(List.of(args));
         Process process;
         try {
-            process = new ProcessBuilder(command).redirectErrorStream(true)
-                    .redirectOutput(ProcessBuilder.Redirect.DISCARD).start();
+            process = new ProcessBuilder(command).redirectErrorStream(true).start();
         } catch (IOException e) {
             throw new IOException("git is needed for this command and was not found", e);
         }
+        String output = new String(process.getInputStream().readAllBytes(), StandardCharsets.UTF_8).strip();
         int code = process.waitFor();
-        if (code != 0 && args[0].equals("clone")) {
-            throw new IOException("git clone failed for " + args[args.length - 2]);
+        if (code != 0 && (args[0].equals("clone") || List.of(args).contains("checkout"))) {
+            throw new IOException("git " + String.join(" ", args) + " failed" + (output.isEmpty() ? "" : ":\n" + output));
         }
         return code;
     }
