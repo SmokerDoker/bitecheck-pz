@@ -52,12 +52,18 @@ Sign it with `bcz sign <file> --key ~/.bitecheck/keys/<you>.key` and open a pull
 
 Anyone can review. Reviews from new accounts are visible but do not count toward approval until the reviewer has built up reputation (see the specification).
 
-Download the jar CI built (artifact `mod-<mod>-<version>` of the pull request's "Mod submission" run), read the source at the release commit and the scan results, then:
+Run these inside the registry checkout; they only need the mod's id:
 
 ```sh
-bcz review registry/mods/<mod>/releases/<version>.toml mod.jar --reviewer <you> --verdict approve --notes "…"
-bcz sign registry/mods/<mod>/reviews/<version>/<you>.toml --key ~/.bitecheck/keys/<you>.key
+bcz status                      # what is waiting for you
+bcz inspect <mod>               # source at the release commit in ~/.bitecheck/review/, scan, source check
+bcz approve <mod>               # or: bcz reject <mod> --notes "why"
+git add registry/mods/<mod> && git commit -m "Review <mod>" && git push
 ```
+
+`bcz inspect` scans published jars itself; for a mod CI rebuilt, download the jar from the "Mod submission" run (artifact `mod-<mod>-<version>`) and run `bcz scan` on it. The commands sign with `~/.bitecheck/keys/<you>.key` (pass `--as <you>` if you have more than one key there). Without `--notes`, an approval says "Full review of the source at commit …"; add `--notes "…"` for anything else you checked.
+
+Publishers of upstream mods sign a prepared entry with `bcz publish <mod>`, which also marks it active.
 
 A review must state what was checked (full review or diff to the previous version) and explain every soft scanner finding. If you find something malicious, **flag it immediately** — a critical flag removes the approval for all players until it is resolved.
 

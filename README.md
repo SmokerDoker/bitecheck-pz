@@ -79,6 +79,10 @@ Your mod is never blocked while it waits for review: players can load it as an u
 ./gradlew :cli:installDist                 # builds with JDK 21, runs on Java 17+
 alias bcz=cli/build/install/bcz/bin/bcz     # or bcz.bat on Windows
 
+bcz status                                  # reviewers: what is next for every mod
+bcz inspect my-mod                          # source at the release commit, scan, source check
+bcz approve my-mod                          # sign your review (bcz publish my-mod: sign as publisher)
+
 bcz keygen alice                            # Ed25519 key pair; private key in ~/.bitecheck/keys/
 bcz sign registry/mods/my-mod/releases/1.0.0.toml --key ~/.bitecheck/keys/alice.key
 bcz build-record <release.toml> <jar> --builder runner-a --builder runner-b   # CI
