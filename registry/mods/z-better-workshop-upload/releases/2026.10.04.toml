@@ -1,0 +1,7 @@
+mod = "z-better-workshop-upload"
+version = "2026.10.04"
+commit = "c7bd197396c85ab5721676eca6551a7f73c37504"
+
+[build]
+type = "published"
+artifacts = ["42/media/java/client/ZBetterWorkshopUpload-2x.jar", "42/media/java/client/ZBetterWorkshopUpload.jar"]

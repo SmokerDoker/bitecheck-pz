@@ -1,0 +1,7 @@
+mod = "z-mod-unbork"
+version = "2026.10.04"
+commit = "a9b34052ef6b8dc117d58a80648bd3e52484c655"
+
+[build]
+type = "published"
+artifacts = ["42/media/java/shared/ZModUnbork-2x.jar", "42/media/java/shared/ZModUnbork.jar"]

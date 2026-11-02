@@ -1,0 +1,8 @@
+id = "zb-lua-perf-mon"
+name = "ZBLuaPerfMon"
+author = "Zed (zed-0xff)"
+publisher = "smokerdoker"
+source = "https://github.com/zed-0xff/ZBLuaPerfMon"
+license = "MIT"
+workshop_id = ""
+status = "pending"

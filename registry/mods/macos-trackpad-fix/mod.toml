@@ -1,0 +1,8 @@
+id = "macos-trackpad-fix"
+name = "Macos Trackpad Fix"
+author = "Fopwoc (fopwoc)"
+publisher = "smokerdoker"
+source = "https://github.com/fopwoc/ProjectZomboidTouchpadFix"
+license = "WTFPL"
+workshop_id = ""
+status = "pending"

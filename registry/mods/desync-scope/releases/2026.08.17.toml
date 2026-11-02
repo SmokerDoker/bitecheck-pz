@@ -1,0 +1,7 @@
+mod = "desync-scope"
+version = "2026.08.17"
+commit = "68d3bd5fd27fc99546958e2a146730737272a4e4"
+
+[build]
+type = "published"
+artifacts = ["DesyncScope/42/media/java/DesyncScope.jar"]
