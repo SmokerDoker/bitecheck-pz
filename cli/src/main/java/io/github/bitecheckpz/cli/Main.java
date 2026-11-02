@@ -36,6 +36,20 @@ public final class Main {
     private static final String USAGE_TEXT = """
             bcz - BiteCheck for Project Zomboid
 
+            Publishers and reviewers (run inside the registry checkout; <version> defaults to the newest):
+              bcz status
+                  What is next for every mod: publish, wait for CI, review.
+              bcz inspect <mod> [version]
+                  Fetch the mod's source at the release commit to ~/.bitecheck/review/, then scan and
+                  source-check its jars.
+              bcz publish <mod> [version]
+                  Sign the release as its publisher and mark a pending entry active.
+              bcz approve <mod> [version] [--notes <text>] [--scope full|diff]
+              bcz reject <mod> [version] --notes <text>
+                  Write and sign your review of the release's build record.
+                  These commands sign with ~/.bitecheck/keys/<name>.key; <name> is the only key there,
+                  or pass --as <name>.
+
             Usage:
               bcz keygen <name> [--dir <dir>]
                   Create an Ed25519 key pair. The private key goes to ~/.bitecheck/keys/<name>.key
@@ -107,6 +121,11 @@ public final class Main {
                 case "release-info" -> releaseInfo(parsed, out);
                 case "source-check" -> sourceCheck(parsed, out);
                 case "site" -> site(parsed, out);
+                case "status" -> ModCommands.status(parsed, out);
+                case "inspect" -> ModCommands.inspect(parsed, out);
+                case "publish" -> ModCommands.publish(parsed, out);
+                case "approve" -> ModCommands.review(parsed, out, "approve");
+                case "reject" -> ModCommands.review(parsed, out, "reject");
                 default -> throw new UsageException("unknown command '" + parsed.command + "'");
             };
         } catch (UsageException e) {
@@ -115,6 +134,10 @@ public final class Main {
             return USAGE;
         } catch (IOException | GeneralSecurityException | Toml.TomlException | IllegalArgumentException e) {
             err.println("bcz: " + e.getMessage());
+            return ERROR;
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            err.println("bcz: interrupted");
             return ERROR;
         }
     }
@@ -367,7 +390,7 @@ public final class Main {
         }
     }
 
-    private static final class Args {
+    static final class Args {
         final String command;
         final List<String> positionals = new ArrayList<>();
         final Map<String, List<String>> options = new HashMap<>();
