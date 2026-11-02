@@ -101,9 +101,12 @@ approves it. You can also run `bcz submit` by hand.
 
 Until your release is reviewed, players can still load it as an unverified mod with a warning.
 
-`[build] game_branch` in `bitecheck.toml` selects a Steam beta branch of the dedicated server to
-compile against (for example `unstable`); without it the public branch is used. The branch must
-exist and must not need a password, otherwise the build fails.
+CI compiles against the current public version of the game. Build your release with an up-to-date
+game too: compiling against another game version can change the jar (constants of the game are
+copied into it), and then the jar you upload to the Workshop no longer matches the one BiteCheck
+verified. `[build] game_branch` in `bitecheck.toml` selects a Steam beta branch of the dedicated
+server instead (for example `pre-release`). The branch must exist and must not need a password,
+otherwise the build fails. Build 41 (`legacy41`) is not supported: ZombieBuddy needs Build 42.
 
 ## Rules
 

@@ -15,6 +15,7 @@ Your mod is never blocked while it waits: players can load it as an unverified m
 
 Requirements for a release:
 
+- Build 42 or newer (ZombieBuddy does not load Java mods in Build 41). CI builds against the current public version of the game unless `game_branch` says otherwise.
 - No obfuscation.
 - No native libraries, no runtime code loading, no process execution.
 - Network access and file access outside `~/Zomboid` must be explained in the mod description and will be checked carefully in review.
