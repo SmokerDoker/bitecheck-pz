@@ -56,6 +56,7 @@ final class ModCommands {
         try (Stream<Path> files = Files.list(registry.modsDir())) {
             mods = files.filter(Files::isDirectory).sorted().toList();
         }
+        int width = mods.stream().mapToInt(d -> d.getFileName().toString().length()).max().orElse(0);
         for (Path dir : mods) {
             String mod = dir.getFileName().toString();
             Map<String, Object> modInfo = registry.read(dir.resolve("mod.toml"));
@@ -63,7 +64,7 @@ final class ModCommands {
                 continue;
             }
             String version = latestVersion(registry, mod);
-            out.printf("%-22s %-12s %s%n", mod, version == null ? "-" : version,
+            out.printf("%-" + width + "s %-12s %s%n", mod, version == null ? "-" : version,
                     version == null ? "no release" : nextStep(registry, mod, version, modInfo, me));
         }
         return Main.OK;

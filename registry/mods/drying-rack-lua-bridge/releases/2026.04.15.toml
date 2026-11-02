@@ -1,0 +1,7 @@
+mod = "drying-rack-lua-bridge"
+version = "2026.04.15"
+commit = "69e6fedaadd65ee56008757ab5cd606c98cbcc05"
+
+[build]
+type = "published"
+artifacts = ["DryingRackLuaBridge/common/media/java/DryingRackLuaBridge.jar"]

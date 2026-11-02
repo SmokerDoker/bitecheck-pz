@@ -1,0 +1,7 @@
+mod = "real-reset"
+version = "2026.10.14"
+commit = "b024f8f7ec59497a0330ce106980ee420d1e0730"
+
+[build]
+type = "published"
+artifacts = ["Contents/mods/RealReset/42/media/java/RealReset.jar"]

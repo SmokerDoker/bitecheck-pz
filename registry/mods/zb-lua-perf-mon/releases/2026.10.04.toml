@@ -1,0 +1,7 @@
+mod = "zb-lua-perf-mon"
+version = "2026.10.04"
+commit = "f95adf92434ea76e5a7cc0de847289bb20d45719"
+
+[build]
+type = "published"
+artifacts = ["42/media/java/client/ZBLuaPerfMon-2x.jar", "42/media/java/client/ZBLuaPerfMon.jar"]

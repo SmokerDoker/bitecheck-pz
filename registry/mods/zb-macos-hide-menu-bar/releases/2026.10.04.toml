@@ -1,0 +1,7 @@
+mod = "zb-macos-hide-menu-bar"
+version = "2026.10.04"
+commit = "53fab6ccfe6e3076cec443519181c7e64fac7129"
+
+[build]
+type = "published"
+artifacts = ["42/media/java/client/ZBMacOSHideMenuBar-2x.jar", "42/media/java/client/ZBMacOSHideMenuBar.jar"]
