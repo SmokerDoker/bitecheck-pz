@@ -4,3 +4,6 @@
 *.command text eol=lf
 gradlew text eol=lf
 *.jar binary
+# Signatures cover exact bytes: registry files and keys look the same on every system.
+registry/** text eol=lf
+keys/** text eol=lf
