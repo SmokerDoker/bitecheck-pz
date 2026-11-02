@@ -2,17 +2,23 @@ package io.github.bitecheckpz.cli;
 
 import io.github.bitecheckpz.cli.Main.Args;
 import io.github.bitecheckpz.cli.Main.UsageException;
+import io.github.bitecheckpz.core.Hashing;
 import io.github.bitecheckpz.core.Keys;
 import io.github.bitecheckpz.core.Lint;
 import io.github.bitecheckpz.core.Registry;
+import io.github.bitecheckpz.core.Releases;
 import io.github.bitecheckpz.core.Signatures;
 import io.github.bitecheckpz.core.Toml;
 
+import java.io.BufferedReader;
 import java.io.IOException;
+import java.io.InputStream;
+import java.io.InputStreamReader;
 import java.io.PrintStream;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.nio.file.StandardCopyOption;
 import java.security.GeneralSecurityException;
 import java.security.KeyPair;
 import java.security.PublicKey;
@@ -21,14 +27,18 @@ import java.util.Comparator;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.Optional;
 import java.util.TreeMap;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 import java.util.stream.Stream;
+import java.util.zip.ZipEntry;
+import java.util.zip.ZipInputStream;
 
 /**
- * Commands around people and their GitHub accounts: {@code login}, {@code submit} (mod authors),
- * {@code submitter-check} (CI), {@code trust} and {@code reviewers} (maintainers).
+ * Commands around people and their GitHub accounts: {@code login}, {@code submit} and
+ * {@code fetch} (mod authors), {@code submitter-check} (CI), {@code trust} and {@code reviewers}
+ * (maintainers).
  */
 final class AccountCommands {
 
@@ -98,15 +108,7 @@ final class AccountCommands {
         if (!commit.matches("[0-9a-f]{40}")) {
             throw new IOException("commit must be a full 40-character hash");
         }
-        String version = a.option("version").orElse(null);
-        if (version == null) {
-            Exec.Result tag = Exec.tryGit(project, "describe", "--tags", "--exact-match", commit);
-            if (tag.code() != 0) {
-                throw new UsageException("tag the release first (git tag v1.0.0) or pass --version");
-            }
-            version = tag.output().replaceFirst("^v", "");
-        }
-        Registry.requireVersion(version);
+        String version = version(a, project, commit);
         if (!commit.equals(Exec.tryGit(project, "rev-parse", commit + "^{commit}").output())
                 || Exec.run(project, "gh", "api", "repos/" + sourceRepo + "/commits/" + commit, "--jq", ".sha")
                         .code() != 0) {
@@ -115,11 +117,7 @@ final class AccountCommands {
 
         Path keyFile = a.option("key").map(Path::of).orElse(null);
         String github = Exec.gh(null, "api", "user", "--jq", ".login");
-        String upstream = a.option("registry-repo").or(() -> java.util.Optional.ofNullable(System.getenv("BITECHECK_REGISTRY"))
-                .filter(s -> !s.isBlank())).orElse(REGISTRY_REPO);
-        if (!upstream.matches("[A-Za-z0-9-]+/[A-Za-z0-9._-]+")) {
-            throw new UsageException("the registry must be given as owner/repository");
-        }
+        String upstream = upstream(a);
         Path work = ModCommands.home().resolve("submit").resolve(id + "-" + version);
         deleteTree(work);
         Files.createDirectories(work.getParent());
@@ -210,6 +208,160 @@ final class AccountCommands {
                         + ", submitted with `bcz submit` by @" + github + ".");
         out.println("Submitted " + id + " " + version + ": " + url);
         return Main.OK;
+    }
+
+    /** --version, else the tag on the commit without a leading "v". */
+    private static String version(Args a, Path project, String commit) throws IOException, UsageException,
+            InterruptedException {
+        String version = a.option("version").orElse(null);
+        if (version == null) {
+            Exec.Result tag = Exec.tryGit(project, "describe", "--tags", "--exact-match", commit);
+            if (tag.code() != 0) {
+                throw new UsageException("tag the release first (git tag v1.0.0) or pass --version");
+            }
+            version = tag.output().replaceFirst("^v", "");
+        }
+        Registry.requireVersion(version);
+        return version;
+    }
+
+    /** The registry's GitHub repository: --registry-repo, $BITECHECK_REGISTRY or the official one. */
+    private static String upstream(Args a) throws UsageException {
+        String upstream = a.option("registry-repo").or(() -> Optional.ofNullable(System.getenv("BITECHECK_REGISTRY"))
+                .filter(s -> !s.isBlank())).orElse(REGISTRY_REPO);
+        if (!upstream.matches("[A-Za-z0-9-]+/[A-Za-z0-9._-]+")) {
+            throw new UsageException("the registry must be given as owner/repository");
+        }
+        return upstream;
+    }
+
+    // ---- fetch ----
+
+    /**
+     * Compares the jars of the mod in the current directory with the registry's signed build record.
+     * Only if they differ, and only after you confirm, replaces them with the jars CI built.
+     */
+    static int fetch(Args a, PrintStream out, InputStream in) throws IOException, Toml.TomlException,
+            UsageException, InterruptedException {
+        Path project = Path.of(a.option("dir").orElse(".")).toAbsolutePath().normalize();
+        Path metaFile = project.resolve("bitecheck.toml");
+        if (!Files.isRegularFile(metaFile)) {
+            throw new IOException("no bitecheck.toml in " + project + " (see the mod template)");
+        }
+        String id = Toml.string(Toml.parse(metaFile), "id");
+        Registry.requireName(id, "mod id");
+        String version = version(a, project, a.option("commit").orElse("HEAD"));
+        String upstream = upstream(a);
+        Registry registry;
+        if (a.option("registry").isPresent()) {
+            registry = new Registry(Path.of(a.option("registry").get()));
+        } else {
+            Path cache = ModCommands.home().resolve("registries").resolve(upstream.replace('/', '-'));
+            if (Files.isDirectory(cache.resolve(".git"))) {
+                Exec.git(cache, "pull", "--quiet", "--ff-only");
+            } else {
+                Files.createDirectories(cache.getParent());
+                Exec.git(null, "clone", "--quiet", "--depth", "1", "https://github.com/" + upstream + ".git",
+                        cache.toString());
+            }
+            registry = new Registry(cache);
+        }
+
+        Path buildFile = registry.buildFile(id, version);
+        if (!Files.isRegularFile(buildFile)) {
+            out.println(id + " " + version + ": no build record yet (CI writes it after the release is merged)");
+            return Main.ERROR;
+        }
+        Keys.PublicKeyInfo registryKey = registry.registryKey()
+                .orElseThrow(() -> new IOException("the registry has no keys/registry.pub"));
+        Signatures.Check check = Signatures.verify(buildFile, registryKey);
+        if (check != Signatures.Check.VALID) {
+            throw new IOException(registry.root().relativize(buildFile) + ": " + check.description());
+        }
+        Map<String, Object> build = registry.read(buildFile);
+        List<String> paths = Releases.artifacts(registry.read(registry.releaseFile(id, version)));
+        List<String> hashes = new ArrayList<>();
+        if ("published".equals(Toml.string(build, "method")) && build.get("artifact_sha256") instanceof List<?> list) {
+            list.forEach(o -> hashes.add(String.valueOf(o)));
+        } else if (Toml.string(build, "jar_sha256") != null) {
+            hashes.add(Toml.string(build, "jar_sha256"));
+        }
+        if (paths.size() != hashes.size() || !hashes.stream().allMatch(Hashing::isSha256Hex)) {
+            throw new IOException(registry.root().relativize(buildFile) + " does not match the release's artifacts");
+        }
+
+        List<Integer> differ = new ArrayList<>();
+        for (int i = 0; i < paths.size(); i++) {
+            Path local = project.resolve(paths.get(i));
+            String sha = Files.isRegularFile(local) ? Hashing.sha256Hex(local) : null;
+            if (!hashes.get(i).equals(sha)) {
+                differ.add(i);
+                out.println(paths.get(i) + ": local " + (sha == null ? "missing" : sha.substring(0, 12))
+                        + ", verified " + hashes.get(i).substring(0, 12));
+            }
+        }
+        if (differ.isEmpty()) {
+            out.println(id + " " + version + ": local jar" + (paths.size() == 1 ? " matches" : "s match")
+                    + " the verified build");
+            return Main.OK;
+        }
+        out.print("Replace with the jar" + (differ.size() == 1 ? "" : "s") + " CI built? [y/N] ");
+        out.flush();
+        String answer = new BufferedReader(new InputStreamReader(in, StandardCharsets.UTF_8)).readLine();
+        if (answer == null || !answer.strip().toLowerCase(Locale.ROOT).startsWith("y")) {
+            out.println("Nothing changed.");
+            return Main.ERROR;
+        }
+
+        // CI's jars: the artifacts of the build jobs (kept 30 days), checked against the build record.
+        String key = (id + "-" + version).replaceAll("[^A-Za-z0-9.-]", "-");
+        Path tmp = Files.createTempDirectory("bcz-fetch");
+        try {
+            for (String builder : List.of("a", "b")) {
+                String urls = Exec.gh(null, "api", "repos/" + upstream + "/actions/artifacts?per_page=20&name=build-"
+                        + builder + "-" + key, "--jq", ".artifacts[] | select(.expired | not) | .archive_download_url");
+                for (String url : urls.lines().filter(s -> !s.isBlank()).toList()) {
+                    Path zip = tmp.resolve("artifact.zip");
+                    if (!Exec.ghToFile(zip, "api", url)) {
+                        continue;
+                    }
+                    Map<Integer, Path> jars = unzipJars(zip, tmp, differ, hashes);
+                    if (jars.size() == differ.size()) {
+                        for (int i : differ) {
+                            Path local = project.resolve(paths.get(i));
+                            Files.createDirectories(local.getParent());
+                            Files.copy(jars.get(i), local, StandardCopyOption.REPLACE_EXISTING);
+                        }
+                        out.println("Replaced with the verified build.");
+                        return Main.OK;
+                    }
+                }
+            }
+        } finally {
+            deleteTree(tmp);
+        }
+        throw new IOException("CI's jars for " + id + " " + version + " are no longer available (kept 30 days);"
+                + " build with the current game version and run 'bcz fetch' again");
+    }
+
+    /** The jars <i>.jar of a build artifact whose SHA-256 is the verified one, by artifact index. */
+    private static Map<Integer, Path> unzipJars(Path zip, Path dir, List<Integer> wanted, List<String> hashes)
+            throws IOException {
+        Map<Integer, Path> found = new TreeMap<>();
+        try (ZipInputStream in = new ZipInputStream(Files.newInputStream(zip))) {
+            for (ZipEntry entry; (entry = in.getNextEntry()) != null; ) {
+                Matcher m = Pattern.compile("(\\d+)\\.jar").matcher(entry.getName());
+                if (m.matches() && wanted.contains(Integer.parseInt(m.group(1)))) {
+                    int i = Integer.parseInt(m.group(1));
+                    Path jar = dir.resolve(i + ".jar");
+                    Files.copy(in, jar, StandardCopyOption.REPLACE_EXISTING);
+                    if (hashes.get(i).equals(Hashing.sha256Hex(jar))) {
+                        found.put(i, jar);
+                    }
+                }
+            }
+        }
+        return found;
     }
 
     private static String releaseText(Map<String, Object> meta, String id, String version, String commit) {

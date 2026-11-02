@@ -59,6 +59,9 @@ public final class Main {
               bcz submit [--version <v>] [--commit <sha>] [--key <file>] [--registry-repo <owner/repo>]
                   Submit the tagged release of the mod in the current directory (reads bitecheck.toml):
                   writes and signs the release file and opens a pull request to the registry.
+              bcz fetch [--version <v>] [--registry-repo <owner/repo>]
+                  Compare the mod's jars with the verified build of the tagged release. Only if they
+                  differ, and only after you confirm, replace them with the jars CI built.
 
             Maintainers:
               bcz trust <reviewer> [new|reviewer|trusted]
@@ -147,6 +150,7 @@ public final class Main {
                 case "flag" -> ModCommands.flag(parsed, out);
                 case "login" -> AccountCommands.login(parsed, out);
                 case "submit" -> AccountCommands.submit(parsed, out);
+                case "fetch" -> AccountCommands.fetch(parsed, out, System.in);
                 case "submitter-check" -> AccountCommands.submitterCheck(parsed, out);
                 case "trust" -> AccountCommands.trust(parsed, out);
                 case "reviewers" -> AccountCommands.reviewers(parsed, out);

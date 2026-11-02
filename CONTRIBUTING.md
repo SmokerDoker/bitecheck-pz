@@ -8,6 +8,7 @@ Thanks for helping! There are three ways to contribute.
 2. Install the [GitHub CLI](https://cli.github.com), run `gh auth login`, then `bcz login`. This creates your signing key in `~/.bitecheck/keys/` — back it up.
 3. Fill in `bitecheck.toml`, tag a release (`git tag v1.0.0 && git push --tags`) and run `bcz submit` in your mod's folder. It writes and signs the release file, registers your key and GitHub account with your first submission, and opens a pull request here.
 4. CI builds your mod twice against the Project Zomboid dedicated server, compares the hashes and scans the jar. A reviewer approves it (how many approvals are needed is set in `registry/policy.toml`), then it is merged.
+5. Before you upload to the Workshop, run `bcz fetch` in your mod's folder: it checks that your jar is exactly the one CI built and BiteCheck verifies. If not (for example, you built against another game version), it offers to replace it with CI's jar.
 
 For later releases, the template's workflow (`.github/workflows/bitecheck.yml`, using [submit-action](submit-action/action.yml)) submits every `v*` tag automatically. It needs two repository secrets: `BITECHECK_AUTHOR_KEY` (the content of your `~/.bitecheck/keys/<you>.key`) and `BITECHECK_GITHUB_TOKEN` (a personal access token with `public_repo`, so it can open the pull request from your fork). See the template's README.
 
