@@ -57,8 +57,12 @@ public final class JarCompare {
         return differences;
     }
 
-    /** The manifest's attributes without the build tool and JDK names, as comparable text. */
-    private static String manifestWithoutBuildInfo(byte[] content) throws IOException {
+    /** A manifest's main attributes and per-entry sections. */
+    private record ManifestAttributes(Map<String, String> main, Map<String, Map<String, String>> sections) {
+    }
+
+    /** The manifest's attributes without the build tool and JDK names. */
+    private static ManifestAttributes manifestWithoutBuildInfo(byte[] content) throws IOException {
         Manifest manifest = new Manifest(new ByteArrayInputStream(content));
         Map<String, String> main = new TreeMap<>();
         manifest.getMainAttributes().forEach((k, v) -> main.put(k.toString(), String.valueOf(v)));
@@ -69,7 +73,7 @@ public final class JarCompare {
             e.getValue().forEach((k, v) -> attributes.put(k.toString(), String.valueOf(v)));
             sections.put(e.getKey(), attributes);
         }
-        return main + " " + sections;
+        return new ManifestAttributes(main, sections);
     }
 
     private static Map<String, byte[]> files(Path jar) throws IOException {
