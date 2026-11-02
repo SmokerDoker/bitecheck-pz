@@ -67,6 +67,8 @@ These commands pull first, commit only the mod's folder and push it — or, with
 
 Publishers of upstream mods sign a prepared entry with `bcz publish <mod>`, which also marks it active.
 
+A review covers the Java code and the build files (for `rebuild` and `workshop` releases the build command runs them). Lua files are not part of it: BiteCheck only decides whether a jar loads, and Lua runs in the game's sandbox either way. What the Java code exposes to Lua (`@LuaMethod`, exposed classes) is part of the review, because every Lua mod can call it.
+
 A review must state what was checked (full review or diff to the previous version) and explain every soft scanner finding. If you find something malicious, **flag it immediately** — a critical flag removes the approval for all players until it is resolved.
 
 ## 3. Work on BiteCheck itself (developers)
