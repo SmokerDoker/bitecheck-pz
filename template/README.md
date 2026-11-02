@@ -102,7 +102,8 @@ approves it. You can also run `bcz submit` by hand.
 Until your release is reviewed, players can still load it as an unverified mod with a warning.
 
 `[build] game_branch` in `bitecheck.toml` selects a Steam beta branch of the dedicated server to
-compile against (for example `pre-release`); without it the public branch is used.
+compile against (for example `unstable`); without it the public branch is used. The branch must
+exist and must not need a password, otherwise the build fails.
 
 ## Rules
 

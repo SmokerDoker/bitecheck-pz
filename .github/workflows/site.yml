@@ -37,7 +37,7 @@ jobs:
           distribution: temurin
           java-version: "21"
       - name: Build bcz
-        run: ./gradlew --no-daemon -q :cli:installDist
+        run: bash .github/scripts/build-bcz.sh
       - name: Generate the site
         run: |
           key=()

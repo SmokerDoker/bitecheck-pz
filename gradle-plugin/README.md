@@ -60,9 +60,9 @@ bitecheck {
 
 ## In BiteCheck's CI
 
-`build-mod.yml` installs the Project Zomboid Dedicated Server (Steam app 380870) with SteamCMD and
-sets `PZ_GAME_DIR` to it before it runs the release's build command, e.g.
-`./gradlew --no-daemon bitecheckMod`. The game files stay on the runner.
+`build-mod.yml` downloads `java/projectzomboid.jar` of the Project Zomboid Dedicated Server (Steam
+app 380870) with DepotDownloader and sets `PZ_GAME_DIR` to it before it runs the release's build
+command, e.g. `./gradlew --no-daemon bitecheckMod`. The game files stay on the runner.
 
 ## Developing the plugin
 
