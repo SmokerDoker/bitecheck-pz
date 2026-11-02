@@ -82,52 +82,70 @@ final class ModCommands {
         if (git(dir, "-c", "advice.detachedHead=false", "checkout", "--quiet", "--force", commit) != 0) {
             throw new IOException("cannot check out " + commit + " in " + dir);
         }
-        out.println(t.mod + " " + t.version + " - " + source + " at " + commit.substring(0, 7));
-        out.println("  source: " + dir);
+        out.println(t.mod + " " + t.version + "  (" + source.replaceFirst("^https://github\\.com/", "") + " @ "
+                + commit.substring(0, 7) + ")");
+        out.println("Source: " + dir);
+        out.println();
         int result = Main.OK;
         if ("published".equals(Toml.string(Toml.table(t.release, "build"), "type"))) {
             Path buildFile = t.registry.buildFile(t.mod, t.version);
             List<String> built = Files.isRegularFile(buildFile) ? Registry.jarHashes(t.registry.read(buildFile))
                     : List.of();
-            for (String artifact : Releases.artifacts(t.release)) {
+            List<String> artifacts = Releases.artifacts(t.release);
+            // 42.13/media/java/client/Mod.jar -> 42.13/Mod.jar
+            List<String> names = artifacts.stream().map(s -> s.replaceFirst("/media/java/[^/]+/", "/")).toList();
+            int width = names.stream().mapToInt(String::length).max().orElse(0);
+            Map<String, Scanner.Severity> findings = new java.util.LinkedHashMap<>();
+            boolean soft = false;
+            for (int i = 0; i < artifacts.size(); i++) {
+                String artifact = artifacts.get(i);
+                String name = String.format("%-" + width + "s", names.get(i));
                 Path jar = dir.resolve(artifact).normalize();
                 if (!Releases.isSafeArtifactPath(artifact) || !jar.startsWith(dir) || !Files.isRegularFile(jar)) {
-                    out.println("  MISSING: " + artifact);
+                    out.println("  !!  " + name + "  missing");
                     result = Main.ERROR;
                     continue;
                 }
                 Scanner.Report report = Scanner.scan(jar);
                 SourceCheck.Result src = SourceCheck.check(jar, dir);
-                out.println();
-                out.println("  " + artifact);
-                out.println("    sha256:  " + report.jarSha256() + (built.isEmpty() ? ""
-                        : built.contains(report.jarSha256()) ? "  (matches the build record)"
-                        : "  (NOT in the build record)"));
-                out.println("    scan:    " + report.classCount() + " classes, "
-                        + report.count(Scanner.Severity.HARD) + " hard, "
-                        + report.count(Scanner.Severity.SOFT) + " soft findings");
+                boolean inBuild = built.isEmpty() || built.contains(report.jarSha256());
+                long hard = report.count(Scanner.Severity.HARD);
+                long softCount = report.count(Scanner.Severity.SOFT);
+                boolean bad = hard > 0 || !src.ok() || !inBuild;
+                out.println("  " + (bad ? "!!" : softCount > 0 ? "??" : "OK") + "  " + name + "  "
+                        + report.classCount() + (report.classCount() == 1 ? " class" : " classes")
+                        + (hard > 0 ? ", " + hard + " hard" : "") + (softCount > 0 ? ", " + softCount + " soft" : "")
+                        + (src.ok() ? "" : ", no source for " + String.join(", ", src.classesWithoutSource()))
+                        + (inBuild ? "" : ", NOT the jar in the build record"));
                 for (Scanner.Finding f : report.findings()) {
-                    out.println("             " + f.severity() + "  " + f.rule() + "  " + f.where() + ": "
-                            + f.detail());
+                    String cls = f.where().substring(f.where().lastIndexOf('.') + 1);
+                    String what = String.join(", ", java.util.Arrays.stream(f.detail().split("; "))
+                            .map(d -> d.replaceFirst(" \\(.*\\)$", "")).distinct().toList());
+                    findings.putIfAbsent(f.rule() + "  " + cls + ": " + what, f.severity());
                 }
-                out.println("    source:  " + (src.ok() ? "every class is declared in the source"
-                        : "NO SOURCE for " + String.join(", ", src.classesWithoutSource())));
-                if (report.hasHardFindings()) {
+                soft |= softCount > 0;
+                if (hard > 0) {
                     result = 14;
-                } else if (!src.ok() && result == Main.OK) {
+                } else if (bad && result == Main.OK) {
                     result = 15;
                 }
             }
+            if (!findings.isEmpty()) {
+                out.println();
+                out.println("Findings (explain each one in your review):");
+                findings.forEach((text, severity) -> out.println("  " + (severity == Scanner.Severity.HARD
+                        ? "!!" : "??") + "  " + text));
+            }
+            out.println();
+            out.println(result != Main.OK
+                    ? "Check the !! lines, then: bcz approve " + t.mod + "  or  bcz reject " + t.mod + " --notes \"why\""
+                    : soft ? "Next: bcz approve " + t.mod + " --notes \"why the findings are fine\""
+                    : "Next: bcz approve " + t.mod);
         } else {
-            out.println("  CI builds this jar from the source; check the jar of the 'Mod submission' run with 'bcz scan'.");
+            out.println("  CI builds this jar; run 'bcz scan' on the jar of the 'Mod submission' run.");
+            out.println();
+            out.println("Next: bcz approve " + t.mod);
         }
-        Path notes = t.registry.root().resolve("docs/reviews").resolve(t.mod + ".md");
-        out.println();
-        if (Files.isRegularFile(notes)) {
-            out.println("Preliminary notes: " + notes);
-        }
-        out.println("Read every file, e.g. with:  code \"" + dir + "\"");
-        out.println("Then:  bcz approve " + t.mod + "   (or: bcz reject " + t.mod + " --notes \"why\")");
         return result;
     }
 
