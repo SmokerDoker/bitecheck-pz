@@ -36,6 +36,10 @@ public final class ModLayout {
         List<String> problems = new ArrayList<>();
         int forBuild42 = 0;
         for (String artifact : artifacts) {
+            if (!Releases.isSafeArtifactPath(artifact)) {
+                problems.add("an artifact path is not a safe relative path to a .jar");
+                continue;
+            }
             int media = ("/" + artifact).indexOf("/media/java/");
             if (media < 1) {
                 problems.add(artifact + ": not in <version folder>/media/java/");

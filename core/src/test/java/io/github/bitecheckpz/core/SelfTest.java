@@ -364,6 +364,8 @@ public final class SelfTest {
             expect(bad.get(2).contains("not named in mod.info"), true);
             expect(bad.get(3).contains("not in <version folder>/media/java/"), true);
             expect(ModLayout.problems(repo, List.of(old)), List.of("no jar for Build 42 (only older version folders)"));
+            expect(ModLayout.problems(repo, List.of("../42/media/java/$(rm -rf ~).jar")),
+                    List.of("an artifact path is not a safe relative path to a .jar"));
         });
         run("source-check: classes match their sources; extra class is reported", () -> {
             Path src = Files.createTempDirectory("bcz-src");
