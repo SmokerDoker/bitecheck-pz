@@ -22,6 +22,7 @@ import java.util.stream.Stream;
  * registry/mods/&lt;mod&gt;/flags/&lt;flag&gt;.toml
  * registry/blocklist.toml
  * keys/registry.pub, keys/authors/&lt;name&gt;.pub, keys/reviewers/&lt;name&gt;.pub, keys/trust.toml
+ * keys/accounts.toml (GitHub accounts), keys/revoked.toml (revoked key ids)
  * </pre>
  *
  * <p>All names read from files are validated before they are used to build paths.
@@ -75,18 +76,104 @@ public final class Registry {
         return readKey(root.resolve("keys").resolve("registry.pub"));
     }
 
+    /** The author's (or publisher's) key, unless it is missing, unreadable or revoked. */
     public Optional<Keys.PublicKeyInfo> authorKey(String name) {
         if (!NAME.matcher(name).matches()) {
             return Optional.empty();
         }
-        return readKey(root.resolve("keys").resolve("authors").resolve(name + ".pub"));
+        return readKey(root.resolve("keys").resolve("authors").resolve(name + ".pub")).filter(k -> !isRevoked(k));
     }
 
+    /** The reviewer's key, unless it is missing, unreadable or revoked. */
     public Optional<Keys.PublicKeyInfo> reviewerKey(String name) {
         if (!NAME.matcher(name).matches()) {
             return Optional.empty();
         }
-        return readKey(root.resolve("keys").resolve("reviewers").resolve(name + ".pub"));
+        return readKey(root.resolve("keys").resolve("reviewers").resolve(name + ".pub")).filter(k -> !isRevoked(k));
+    }
+
+    /**
+     * Why the key in keys/&lt;folder&gt;/&lt;name&gt;.pub is revoked, if it is ("authors" or "reviewers").
+     * Revoked keys are listed by key id in keys/revoked.toml; nothing they signed counts any more.
+     */
+    public Optional<String> revocation(String folder, String name) {
+        if (!NAME.matcher(name).matches() || !List.of("authors", "reviewers").contains(folder)) {
+            return Optional.empty();
+        }
+        return readKey(root.resolve("keys").resolve(folder).resolve(name + ".pub")).flatMap(this::revocation);
+    }
+
+    private Optional<String> revocation(Keys.PublicKeyInfo key) {
+        Path file = root.resolve("keys").resolve("revoked.toml");
+        if (!Files.isRegularFile(file)) {
+            return Optional.empty();
+        }
+        try {
+            Map<String, Object> entry = Toml.table(Toml.parse(file), "revoked." + key.id());
+            if (entry.isEmpty()) {
+                return Optional.empty();
+            }
+            String reason = Toml.string(entry, "reason");
+            return Optional.of(reason == null || reason.isBlank() ? "revoked" : "revoked: " + reason);
+        } catch (IOException | Toml.TomlException e) {
+            return Optional.of("revoked.toml cannot be read, so no key is trusted: " + e.getMessage());
+        }
+    }
+
+    private boolean isRevoked(Keys.PublicKeyInfo key) {
+        return revocation(key).isPresent();
+    }
+
+    /** GitHub account linked to a key name in keys/accounts.toml ({@code [accounts.<name>] github = "..."}). */
+    public Optional<String> githubAccount(String name) throws IOException, Toml.TomlException {
+        Path file = root.resolve("keys").resolve("accounts.toml");
+        if (!NAME.matcher(name).matches() || !Files.isRegularFile(file)) {
+            return Optional.empty();
+        }
+        return Optional.ofNullable(Toml.string(Toml.table(Toml.parse(file), "accounts." + name), "github"));
+    }
+
+    /** All release versions of a mod, oldest first (by {@link #compareVersions}). */
+    public List<String> versions(String mod) throws IOException {
+        Path releases = modDir(mod).resolve("releases");
+        if (!Files.isDirectory(releases)) {
+            return List.of();
+        }
+        try (Stream<Path> files = Files.list(releases)) {
+            return files.map(p -> p.getFileName().toString())
+                    .filter(n -> n.endsWith(".toml") && !n.endsWith(".build.toml"))
+                    .map(n -> n.substring(0, n.length() - ".toml".length()))
+                    .filter(v -> VERSION.matcher(v).matches())
+                    .sorted(Registry::compareVersions).toList();
+        }
+    }
+
+    /** The release directly before {@code version}, or null if it is the first. */
+    public String previousVersion(String mod, String version) throws IOException {
+        String previous = null;
+        for (String v : versions(mod)) {
+            if (compareVersions(v, version) < 0) {
+                previous = v;
+            }
+        }
+        return previous;
+    }
+
+    /** Compares versions part by part, numbers numerically: 1.10 > 1.9, 2026.10.04 > 2026.9.30. */
+    public static int compareVersions(String x, String y) {
+        String[] a = x.split("[.+_-]");
+        String[] b = y.split("[.+_-]");
+        for (int i = 0; i < Math.max(a.length, b.length); i++) {
+            String p = i < a.length ? a[i] : "";
+            String q = i < b.length ? b[i] : "";
+            int c = p.matches("\\d{1,18}") && q.matches("\\d{1,18}")
+                    ? Long.compare(Long.parseLong(p), Long.parseLong(q))
+                    : p.compareTo(q);
+            if (c != 0) {
+                return c;
+            }
+        }
+        return 0;
     }
 
     /** Reviewer level from keys/trust.toml: "new" (default), "reviewer" or "trusted". */

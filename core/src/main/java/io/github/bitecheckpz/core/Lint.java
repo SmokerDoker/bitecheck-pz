@@ -110,6 +110,35 @@ public final class Lint {
                 }
             }
         }
+        Path revoked = keys.resolve("revoked.toml");
+        if (Files.isRegularFile(revoked)) {
+            Map<String, Object> doc = parse(revoked);
+            if (doc != null) {
+                for (Map.Entry<String, Object> e : Toml.table(doc, "revoked").entrySet()) {
+                    if (!e.getKey().matches("[0-9a-f]{16}") || !(e.getValue() instanceof Map<?, ?>)) {
+                        error(revoked, "[revoked.<key id>] needs the 16-character key id of the revoked key");
+                    }
+                }
+            }
+        }
+        Path accounts = keys.resolve("accounts.toml");
+        if (Files.isRegularFile(accounts)) {
+            Map<String, Object> doc = parse(accounts);
+            if (doc != null) {
+                for (Map.Entry<String, Object> e : Toml.table(doc, "accounts").entrySet()) {
+                    String github = e.getValue() instanceof Map<?, ?> m && m.get("github") instanceof String s ? s : "";
+                    if (!Registry.NAME.matcher(e.getKey()).matches()) {
+                        error(accounts, "invalid name '" + e.getKey() + "'");
+                    } else if (!Files.isRegularFile(keys.resolve("authors").resolve(e.getKey() + ".pub"))
+                            && !Files.isRegularFile(keys.resolve("reviewers").resolve(e.getKey() + ".pub"))) {
+                        error(accounts, e.getKey() + ": no key in keys/authors/ or keys/reviewers/");
+                    }
+                    if (!github.matches("[A-Za-z0-9](?:[A-Za-z0-9-]{0,38})")) {
+                        error(accounts, e.getKey() + ": github must be a GitHub user name");
+                    }
+                }
+            }
+        }
         Path trust = keys.resolve("trust.toml");
         if (Files.isRegularFile(trust)) {
             Map<String, Object> doc = parse(trust);
@@ -169,7 +198,8 @@ public final class Lint {
         } else if (!unsigned) {
             authorKey = registry.authorKey(author);
             if (authorKey.isEmpty()) {
-                error(modFile, "no key keys/authors/" + author + ".pub");
+                error(modFile, registry.revocation("authors", author).map(r -> "key of '" + author + "' " + r)
+                        .orElse("no key keys/authors/" + author + ".pub"));
             }
         }
 
@@ -317,9 +347,15 @@ public final class Lint {
         if (!SCOPES.contains(String.valueOf(Toml.string(doc, "scope")))) {
             error(f, "scope must be full or diff");
         }
+        if ("diff".equals(Toml.string(doc, "scope"))
+                && (!Registry.VERSION.matcher(String.valueOf(Toml.string(doc, "base_version"))).matches()
+                        || !String.valueOf(Toml.string(doc, "base_commit")).matches("[0-9a-f]{40}"))) {
+            error(f, "a diff review needs base_version and base_commit (full 40-character hash)");
+        }
         var key = registry.reviewerKey(reviewer);
         if (key.isEmpty()) {
-            error(f, "no key keys/reviewers/" + reviewer + ".pub");
+            error(f, registry.revocation("reviewers", reviewer).map(r -> "key of '" + reviewer + "' " + r)
+                    .orElse("no key keys/reviewers/" + reviewer + ".pub"));
         } else {
             Signatures.Check sig = Signatures.verify(f, key.get());
             if (sig != Signatures.Check.VALID) {
@@ -336,8 +372,10 @@ public final class Lint {
         if (!mod.equals(Toml.string(doc, "mod"))) {
             error(f, "mod must be \"" + mod + "\"");
         }
-        if (!Hashing.isSha256Hex(Toml.string(doc, "jar_sha256"))) {
-            error(f, "jar_sha256 must be a SHA-256 hash");
+        // A flag names one jar, or without jar_sha256 every jar of one version.
+        if (doc.containsKey("jar_sha256") ? !Hashing.isSha256Hex(Toml.string(doc, "jar_sha256"))
+                : !Registry.VERSION.matcher(String.valueOf(Toml.string(doc, "version"))).matches()) {
+            error(f, "needs jar_sha256 (a SHA-256 hash) or a version");
         }
         if (!SEVERITIES.contains(String.valueOf(Toml.string(doc, "severity")))) {
             error(f, "severity must be info, suspicion or critical");
