@@ -69,7 +69,7 @@ Your mod is never blocked while it waits for review: players can load it as an u
 - [x] Registry website generated from the registry files (`bcz site`, GitHub Pages)
 - [x] Installers for Windows, macOS and Linux built by GitHub Actions (`release.yml`)
 - [x] Start-up policy: one trusted review, publishers may review upstream mods (later two reviews, see `registry/policy.toml`)
-- [x] Nine mods prepared as pending entries with preliminary reviews ([docs/reviews](docs/reviews/README.md))
+- [x] Ten mods prepared as pending entries with preliminary reviews ([docs/reviews](docs/reviews/README.md))
 - [ ] First test with real players
 - [x] Registry key set up ([docs/SETUP-REGISTRY.md](docs/SETUP-REGISTRY.md)); first verified mod: zb-hello-world
 - [x] `bcz login` / `bcz submit` (GitHub integration), [mod template](template/README.md), [Gradle plugin](gradle-plugin/README.md) and submit action

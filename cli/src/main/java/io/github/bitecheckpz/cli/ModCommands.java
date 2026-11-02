@@ -4,6 +4,7 @@ import io.github.bitecheckpz.cli.Main.Args;
 import io.github.bitecheckpz.cli.Main.UsageException;
 import io.github.bitecheckpz.core.Hashing;
 import io.github.bitecheckpz.core.Keys;
+import io.github.bitecheckpz.core.ModLayout;
 import io.github.bitecheckpz.core.Records;
 import io.github.bitecheckpz.core.Registry;
 import io.github.bitecheckpz.core.Releases;
@@ -108,6 +109,15 @@ final class ModCommands {
             List<String> built = Files.isRegularFile(buildFile) ? Registry.jarHashes(t.registry.read(buildFile))
                     : List.of();
             List<String> artifacts = Releases.artifacts(t.release);
+            List<String> layout = ModLayout.problems(dir, artifacts);
+            if (layout.isEmpty()) {
+                out.println("Layout: Build 42 loads it (version folder, mod.info, jars named in javaJarFile)");
+            } else {
+                out.println("Layout: the game or ZombieBuddy will not load this - reject it:");
+                layout.forEach(p -> out.println("  !!  " + p));
+                result = 15;
+            }
+            out.println();
             // 42.13/media/java/client/Mod.jar -> 42.13/Mod.jar
             List<String> names = artifacts.stream().map(s -> s.replaceFirst("/media/java/[^/]+/", "/")).toList();
             int width = names.stream().mapToInt(String::length).max().orElse(0);
@@ -177,11 +187,15 @@ final class ModCommands {
             }
             String approve = "bcz approve " + t.mod + (base != null ? " --scope diff" : "");
             out.println();
-            out.println(!built.isEmpty() && matching != artifacts.size()
+            boolean pending = "pending".equals(Toml.string(t.modInfo, "status"));
+            out.println(!layout.isEmpty()
+                    ? (pending ? "Do not publish it: the mod does not load"
+                            : "Do not approve: bcz reject " + t.mod + " --notes \"does not load: " + layout.get(0) + "\"")
+                    : !built.isEmpty() && matching != artifacts.size()
                     ? "Do not approve: bcz reject " + t.mod + " --notes \"jars do not match the build record\""
                     : result != Main.OK
                     ? "Check the !! lines, then: " + approve + "  or  bcz reject " + t.mod + " --notes \"why\""
-                    : "pending".equals(Toml.string(t.modInfo, "status")) ? "Next: bcz publish " + t.mod
+                    : pending ? "Next: bcz publish " + t.mod
                             + " (publisher), then after CI: " + approve
                     : soft ? "Next: " + approve + " --notes \"why the findings are fine\""
                     : "Next: " + approve);

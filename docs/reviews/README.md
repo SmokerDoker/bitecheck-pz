@@ -21,3 +21,8 @@ the public source, and the bytecode is compared with the source by hand (`javap 
 | [zb-lua-perf-mon](zb-lua-perf-mon.md) | `f95adf9` | 2 | 0 | Lua performance overlay; its log writer is dead code |
 | [z-better-workshop-upload](z-better-workshop-upload.md) | `c7bd197` | 2 | 0 | Filtered Workshop upload; staging copy in the OS temp folder; `-2x` jar from an older commit |
 | [real-reset](real-reset.md) | `b024f8f` | 1 | 0 | Server admin chunk reset; paths stay in the save folder, admin only |
+| [desync-scope](desync-scope.md) | `68d3bd5` | 1 | 0 | Multiplayer desync diagnostics, only measures; reports in `~/Zomboid/DesyncScope` |
+
+`bcz inspect` also checks the layout: a version folder (`42/`, `42.x/`) next to `common/`, `mod.info`
+in one of them, and every jar named in `javaJarFile`. drying-rack-lua-bridge was left out because
+it has no version folder.
