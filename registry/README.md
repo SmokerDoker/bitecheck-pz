@@ -13,6 +13,8 @@ registry/
 keys/
   registry.pub, authors/<name>.pub, reviewers/<name>.pub
   trust.toml                                         reviewer levels
+  accounts.toml                                      GitHub account of each name
+  revoked.toml                                       revoked keys, by key id
 ```
 
 ## When is a release verified?
@@ -21,8 +23,9 @@ keys/
 
 1. A build record with the jar's SHA-256 exists and is signed by the registry key.
 2. The release file it was built from is unchanged and signed by the mod's author.
-3. Enough different reviewers approved exactly this jar hash (or the build record listing it) with valid signatures, as set in `policy.toml`: `required_approvals` (default 2), of which `required_trusted` have level `trusted` (default 1). The author never counts; the publisher of an upstream mod counts only while `publisher_may_review = true` (start-up policy: one trusted approval, publisher may review).
-4. There is no open critical flag for this hash.
+3. Enough different reviewers approved exactly this jar hash (or the build record listing it) with valid signatures, as set in `policy.toml`: `required_approvals` (default 2), of which `required_trusted` have level `trusted` (default 1). The author never counts; the publisher of an upstream mod counts only while `publisher_may_review = true` (start-up policy: one trusted approval, publisher may review). A review with `scope = "diff"` checked only the changes since the previous release; it counts only if it names the release directly before this one and that release is itself `VERIFIED`.
+4. There is no open critical flag for this hash or its version.
+5. None of the keys involved is listed in `keys/revoked.toml`.
 
 Other results: `UNVERIFIED` (not in the registry or not enough approvals — the launcher asks the user), `FLAGGED` (open critical flag — strong warning), `BLOCKED` (on the block list or a confirmed flag — never loaded), `INVALID` (files do not match their signatures — treated as tampering).
 
@@ -52,19 +55,39 @@ jar_sha256 = "…"
 reviewer = "bob"          # must match the file name
 verdict = "approve"       # approve | reject | questions
 scope = "full"            # full | diff
+base_version = "0.9.0"    # diff only: the previous release ...
+base_commit = "…"         # ... and its commit
 reviewed_at = "2026-11-01T10:00:00Z"
 notes = "…"
 ```
 
-**Flag** (`flags/<id>.toml`):
+A review names either one jar (`jar_sha256`) or the whole build record (`build_sha256`, what `bcz approve` writes).
+
+**Flag** (`flags/<id>.toml`, written by `bcz flag`):
 
 ```toml
 mod = "example-mod"
 version = "1.0.0"
-jar_sha256 = "…"
+jar_sha256 = "…"          # optional: without it the flag covers every jar of the version
 severity = "critical"     # info | suspicion | critical
 status = "open"           # open | resolved | confirmed
 description = "…"
+```
+
+**Accounts** (`keys/accounts.toml`): links a key name to a GitHub account. `bcz submit` adds the entry with an author's first submission; CI (`bcz submitter-check`) only accepts pull requests that change a mod, release or review from the account linked to its publisher or reviewer.
+
+```toml
+[accounts.alice]
+github = "Alice-GH"
+```
+
+**Revoked keys** (`keys/revoked.toml`): nothing signed by a listed key counts any more — its releases are `INVALID`, its reviews are not counted. Re-sign with a new key after revoking.
+
+```toml
+[revoked.0e851eed1114101d]   # key id, as shown by bcz login / bcz keygen
+name = "alice"
+revoked_at = "2026-11-02"
+reason = "key leaked"
 ```
 
 **Block list** (`blocklist.toml`):

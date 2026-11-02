@@ -48,7 +48,13 @@ How many approvals a release needs is set in `registry/policy.toml`. The start-u
 
 A publisher signs release files with a key in `keys/authors/<name>.pub`; a reviewer signs reviews with a key in `keys/reviewers/<name>.pub`. One person can use the same key pair for both: copy the `.pub` file into both folders.
 
-## Rotating a compromised key
+Set and check levels with `bcz trust <name> [new|reviewer|trusted]`; `bcz reviewers` lists everyone with their level, GitHub account and how many reviews they signed — the basis for promoting someone.
+
+## Revoking an author's or reviewer's key
+
+If a personal key leaks or is lost, add its key id to `keys/revoked.toml` (see [registry/README.md](../registry/README.md)). From that commit on, nothing it signed counts: its releases become `INVALID` and its reviews stop counting. The owner creates a new key (`bcz login` after moving the old `~/.bitecheck/keys/<name>.key` away), a maintainer replaces their `.pub` file, and they re-sign their releases (`bcz publish`) or reviews (`bcz approve`).
+
+## Rotating a compromised registry key
 
 1. Create a new key (step 1) and replace the secret (step 2).
 2. Re-sign all build records: delete the `*.build.toml(.sig)` files in one commit; the `Registry` workflow rebuilds and signs them again.

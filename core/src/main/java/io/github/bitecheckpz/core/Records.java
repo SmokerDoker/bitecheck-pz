@@ -82,7 +82,8 @@ public final class Records {
     /**
      * Writes {@code reviews/<version>/<reviewer>.toml}. With a jar, the review covers that jar;
      * with {@code jar == null}, it covers the release's build record (all its jars), which must
-     * exist already. Sign the file afterwards.
+     * exist already. A {@code "diff"} review records the previous release as its base. Sign the
+     * file afterwards.
      */
     public static Path writeReview(Path releaseFile, Path jar, String reviewer, String verdict, String scope,
             String notes) throws IOException, Toml.TomlException {
@@ -116,6 +117,17 @@ public final class Records {
         out.append("reviewer = ").append(Toml.quote(reviewer)).append('\n');
         out.append("verdict = ").append(Toml.quote(verdict)).append('\n');
         out.append("scope = ").append(Toml.quote(scope)).append('\n');
+        if (scope.equals("diff")) {
+            // A diff review checks the changes since the release directly before this one.
+            Registry registry = new Registry(modDir.getParent().getParent().getParent());
+            String base = registry.previousVersion(mod, version);
+            if (base == null) {
+                throw new IllegalArgumentException(mod + " " + version + " is the first release: a full review is needed");
+            }
+            String baseCommit = Toml.string(Toml.parse(registry.releaseFile(mod, base)), "commit");
+            out.append("base_version = ").append(Toml.quote(base)).append('\n');
+            out.append("base_commit = ").append(Toml.quote(String.valueOf(baseCommit))).append('\n');
+        }
         out.append("reviewed_at = ").append(Toml.quote(Instant.now().truncatedTo(ChronoUnit.SECONDS).toString()))
                 .append('\n');
         out.append("notes = ").append(Toml.quote(notes == null ? "" : notes)).append('\n');

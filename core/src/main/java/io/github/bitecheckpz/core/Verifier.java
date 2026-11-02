@@ -182,7 +182,8 @@ public final class Verifier {
             var authorKey = author == null || !Registry.NAME.matcher(author).matches()
                     ? Optional.<Keys.PublicKeyInfo>empty() : registry.authorKey(author);
             if (authorKey.isEmpty()) {
-                messages.add("no valid key for publisher '" + author + "'");
+                messages.add(registry.revocation("authors", author).map(r -> "key of publisher '" + author + "' " + r)
+                        .orElse("no valid key for publisher '" + author + "'"));
                 return new Result(Status.INVALID, sha, mod, version, messages);
             }
             Signatures.Check releaseSig = Signatures.verify(releaseFile, authorKey.get());
@@ -193,7 +194,7 @@ public final class Verifier {
             messages.add("release signed by '" + author + "'");
 
             // 3. Flags.
-            Status flagStatus = checkFlags(sha, mod, messages);
+            Status flagStatus = checkFlags(sha, mod, version, messages);
             if (flagStatus != null) {
                 return new Result(flagStatus, sha, mod, version, messages, method);
             }
@@ -271,16 +272,52 @@ public final class Verifier {
         }
         var key = registry.reviewerKey(reviewer);
         if (key.isEmpty()) {
-            return "no valid key for this reviewer";
+            return registry.revocation("reviewers", reviewer).map(r -> "reviewer key " + r)
+                    .orElse("no valid key for this reviewer");
         }
         Signatures.Check sig = Signatures.verify(file, key.get());
         if (sig != Signatures.Check.VALID) {
             return sig.description();
         }
+        if ("diff".equals(Toml.string(review, "scope"))) {
+            return diffBaseProblem(review, mod, version);
+        }
         return null;
     }
 
-    private Status checkFlags(String sha, String mod, List<String> messages) throws IOException, Toml.TomlException {
+    /**
+     * A diff review only checked the changes since an earlier release. It counts only against the
+     * release directly before this one, at that release's commit, and only if that release is verified.
+     */
+    private String diffBaseProblem(Map<String, Object> review, String mod, String version)
+            throws IOException, Toml.TomlException {
+        String previous = registry.previousVersion(mod, version);
+        String base = Toml.string(review, "base_version");
+        if (previous == null) {
+            return "diff review, but there is no earlier release";
+        }
+        if (!previous.equals(base)) {
+            return "diff review against '" + base + "', not the previous release " + previous;
+        }
+        String baseCommit = Toml.string(registry.read(registry.releaseFile(mod, previous)), "commit");
+        if (baseCommit == null || !baseCommit.equals(Toml.string(review, "base_commit"))) {
+            return "diff review base commit is not the commit of release " + previous;
+        }
+        Path baseBuild = registry.buildFile(mod, previous);
+        List<String> baseJars = Files.isRegularFile(baseBuild) ? Registry.jarHashes(registry.read(baseBuild)) : List.of();
+        if (baseJars.isEmpty()) {
+            return "previous release " + previous + " has no build record";
+        }
+        for (String jar : baseJars) {
+            if (verifyHash(jar).status() != Status.VERIFIED) {
+                return "previous release " + previous + " is not verified, so a full review is needed";
+            }
+        }
+        return null;
+    }
+
+    private Status checkFlags(String sha, String mod, String version, List<String> messages)
+            throws IOException, Toml.TomlException {
         Path flagsDir = registry.flagsDir(mod);
         if (!Files.isDirectory(flagsDir)) {
             return null;
@@ -292,7 +329,9 @@ public final class Verifier {
         Status result = null;
         for (Path flagFile : flagFiles) {
             Map<String, Object> flag = registry.read(flagFile);
-            if (!sha.equals(Toml.string(flag, "jar_sha256"))) {
+            // A flag names one jar, or without jar_sha256 every jar of its version.
+            String flaggedJar = Toml.string(flag, "jar_sha256");
+            if (flaggedJar == null ? !version.equals(Toml.string(flag, "version")) : !sha.equals(flaggedJar)) {
                 continue;
             }
             String severity = Toml.string(flag, "severity");

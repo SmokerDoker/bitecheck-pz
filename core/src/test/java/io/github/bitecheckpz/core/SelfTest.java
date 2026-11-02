@@ -232,6 +232,80 @@ public final class SelfTest {
             expect(Lint.check(f.registry(), java.util.Optional.of(f.registryKey)).stream()
                     .anyMatch(e -> e.contains("publisher_may_review must be true or false")), true);
         });
+        run("diff: a diff review counts only against the verified previous release", () -> {
+            Fixture f = Fixture.create();
+            Files.writeString(f.dir.resolve("registry/policy.toml"), "required_approvals = 1\nrequired_trusted = 1\n");
+            Path release2 = f.modDir.resolve("releases/1.1.0.toml");
+            Files.writeString(release2, Files.readString(f.releaseFile).replace("1.0.0", "1.1.0")
+                    .replace("0123456789abcdef0123456789abcdef01234567", "1111111111111111111111111111111111111111"));
+            Signatures.sign(release2, f.author);
+            Path jar2 = f.dir.resolve("better-guns-1.1.0.jar");
+            Files.writeString(jar2, "version two");
+            Signatures.sign(Records.writeBuildRecord(release2, jar2, List.of("a", "b")), f.registry);
+            Path diff = Records.writeReview(release2, jar2, "bob", "approve", "diff", "only the changes");
+            Signatures.sign(diff, f.bob);
+            expect(Toml.string(Toml.parse(diff), "base_version"), "1.0.0");
+            expect(Toml.string(Toml.parse(diff), "base_commit"), "0123456789abcdef0123456789abcdef01234567");
+            Verifier verifier = new Verifier(f.registry(), f.registryKey);
+            expect(verifier.verify(jar2).status(), Verifier.Status.VERIFIED);
+            expect(Lint.check(f.registry(), java.util.Optional.of(f.registryKey)), List.of());
+            f.addFlag("open", "critical"); // 1.0.0 is no longer verified
+            Verifier.Result r = verifier.verify(jar2);
+            expect(r.status(), Verifier.Status.UNVERIFIED);
+            expect(r.messages().stream().anyMatch(m -> m.contains("1.0.0 is not verified")), true);
+            boolean refused = false;
+            try {
+                Records.writeReview(f.releaseFile, f.jar, "dave", "approve", "diff", "");
+            } catch (IllegalArgumentException e) {
+                refused = true; // the first release has nothing to diff against
+            }
+            expect(refused, true);
+        });
+        run("revoked: nothing signed by a revoked key counts", () -> {
+            Fixture f = Fixture.create();
+            String bob = Keys.readPublic(f.dir.resolve("keys/reviewers/bob.pub")).id();
+            Path revoked = f.dir.resolve("keys/revoked.toml");
+            Files.writeString(revoked, "[revoked." + bob + "]\nname = \"bob\"\nreason = \"key leaked\"\n");
+            Verifier.Result r = f.verify();
+            expect(r.status(), Verifier.Status.UNVERIFIED);
+            expect(r.messages().stream().anyMatch(m -> m.contains("revoked: key leaked")), true);
+            expect(Lint.check(f.registry(), java.util.Optional.of(f.registryKey)).stream()
+                    .anyMatch(e -> e.contains("key of 'bob' revoked: key leaked")), true);
+            String alice = Keys.readPublic(f.dir.resolve("keys/authors/alice.pub")).id();
+            Files.writeString(revoked, "[revoked." + alice + "]\nreason = \"lost\"\n",
+                    java.nio.file.StandardOpenOption.APPEND);
+            expect(f.verify().status(), Verifier.Status.INVALID);
+            Files.writeString(revoked, "[revoked.alice]\nreason = \"by name\"\n");
+            expect(Lint.check(f.registry(), java.util.Optional.of(f.registryKey)).stream()
+                    .anyMatch(e -> e.contains("16-character key id")), true);
+        });
+        run("flags: a flag without jar_sha256 covers every jar of its version", () -> {
+            Fixture f = Fixture.create();
+            Files.createDirectories(f.modDir.resolve("flags"));
+            Files.writeString(f.modDir.resolve("flags/v.toml"), "mod = \"better-guns\"\nversion = \"1.0.0\"\n"
+                    + "severity = \"critical\"\nstatus = \"open\"\ndescription = \"whole release\"\n");
+            expect(f.verify().status(), Verifier.Status.FLAGGED);
+            expect(Lint.check(f.registry(), java.util.Optional.of(f.registryKey)), List.of());
+        });
+        run("accounts: GitHub accounts need a key and a valid user name", () -> {
+            Fixture f = Fixture.create();
+            Files.writeString(f.dir.resolve("keys/accounts.toml"),
+                    "[accounts.alice]\ngithub = \"Alice-GH\"\n[accounts.zed]\ngithub = \"not valid\"\n");
+            expect(f.registry().githubAccount("alice"), java.util.Optional.of("Alice-GH"));
+            List<String> problems = Lint.check(f.registry(), java.util.Optional.of(f.registryKey));
+            expect(problems.stream().anyMatch(p -> p.contains("zed: no key")), true);
+            expect(problems.stream().anyMatch(p -> p.contains("zed: github must be")), true);
+            expect(problems.stream().anyMatch(p -> p.contains("alice")), false);
+        });
+        run("keys: the public key is derived from the private key", () -> {
+            java.security.KeyPair pair = Keys.generate();
+            expect(Keys.keyId(Keys.publicKey(pair.getPrivate())), Keys.keyId(pair.getPublic()));
+        });
+        run("versions: compared part by part, numbers numerically", () -> {
+            expect(Registry.compareVersions("1.10", "1.9") > 0, true);
+            expect(Registry.compareVersions("2026.10.04", "2026.9.30") > 0, true);
+            expect(Registry.compareVersions("1.0", "1.0") == 0, true);
+        });
         run("policy: bootstrap policy with one trusted approval", () -> {
             Fixture f = Fixture.create();
             Files.delete(f.reviewFile("carol"));

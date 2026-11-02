@@ -51,6 +51,38 @@ public final class Keys {
         }
     }
 
+    /**
+     * The public half of an Ed25519 private key. The JDK has no direct call for this, so the key
+     * pair is generated again from the private key's 32-byte seed.
+     */
+    public static PublicKey publicKey(PrivateKey key) throws GeneralSecurityException {
+        if (!(key instanceof java.security.interfaces.EdECPrivateKey ed) || ed.getBytes().isEmpty()) {
+            throw new GeneralSecurityException("not an Ed25519 private key");
+        }
+        byte[] seed = ed.getBytes().get();
+        KeyPairGenerator generator = KeyPairGenerator.getInstance(ALGORITHM);
+        generator.initialize(java.security.spec.NamedParameterSpec.ED25519, new java.security.SecureRandom() {
+            private static final long serialVersionUID = 1L;
+
+            @Override
+            public void nextBytes(byte[] bytes) {
+                System.arraycopy(seed, 0, bytes, 0, Math.min(seed.length, bytes.length));
+            }
+        });
+        PublicKey derived = generator.generateKeyPair().getPublic();
+        // Make sure the derived key really belongs to the private key.
+        java.security.Signature s = java.security.Signature.getInstance(ALGORITHM);
+        s.initSign(key);
+        s.update(seed);
+        byte[] signature = s.sign();
+        s.initVerify(derived);
+        s.update(seed);
+        if (!s.verify(signature)) {
+            throw new GeneralSecurityException("cannot derive the public key from this private key");
+        }
+        return derived;
+    }
+
     public static String keyId(PublicKey key) {
         return Hashing.sha256Hex(key.getEncoded()).substring(0, 16);
     }
