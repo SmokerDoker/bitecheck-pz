@@ -1,0 +1,25 @@
+# Submits every release tag (v1.0.0, v1.2.3, ...) to the BiteCheck registry as a pull request.
+# Repository secrets (Settings > Secrets and variables > Actions):
+#   BITECHECK_AUTHOR_KEY    your private signing key (content of ~/.bitecheck/keys/<name>.key)
+#   BITECHECK_GITHUB_TOKEN  a personal access token that may fork the registry and open pull
+#                           requests (classic token with the scopes "public_repo" and "workflow")
+name: BiteCheck
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: read
+
+jobs:
+  submit:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: SmokerDoker/bitecheck-pz/submit-action@main
+        with:
+          author-key: ${{ secrets.BITECHECK_AUTHOR_KEY }}
+          github-token: ${{ secrets.BITECHECK_GITHUB_TOKEN }}
