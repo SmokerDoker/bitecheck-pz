@@ -3,6 +3,10 @@ name: Build
 on:
   push:
     branches: [main]
+    # registry changes (bcz publish, approve, ...) do not change code; the Registry workflow checks them
+    paths-ignore:
+      - "registry/**"
+      - "**.md"
   pull_request:
     paths-ignore:
       - "registry/**"
