@@ -1,8 +1,0 @@
-id = "drying-rack-lua-bridge"
-name = "Drying Rack Lua Bridge"
-author = "SP4RTAN (ThisIsSP4RTAN)"
-publisher = "smokerdoker"
-source = "https://github.com/ThisIsSP4RTAN/PZ-DryingRackLuaBridge"
-license = "MIT"
-workshop_id = ""
-status = "pending"
