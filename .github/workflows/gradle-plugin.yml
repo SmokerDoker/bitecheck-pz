@@ -1,0 +1,91 @@
+# The BiteCheck Gradle plugin for mod authors (gradle-plugin/, a separate Gradle build).
+#   push / pull request touching gradle-plugin/: build and test only
+#   tag plugin-v<version> (e.g. plugin-v0.1.0) or "Run workflow": test, then publish to the
+#   Gradle Plugin Portal as io.github.smokerdoker.bitecheck <version>
+# Publishing needs the secrets GRADLE_PUBLISH_KEY and GRADLE_PUBLISH_SECRET (API key of a Plugin
+# Portal account that is linked to the SmokerDoker GitHub account) in the environment
+# gradle-plugin-portal.
+name: Gradle plugin
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "gradle-plugin/**"
+      - ".github/workflows/gradle-plugin.yml"
+    tags: ["plugin-v*"] # path filters do not apply to tags
+  pull_request:
+    paths:
+      - "gradle-plugin/**"
+      - ".github/workflows/gradle-plugin.yml"
+  workflow_dispatch:
+    inputs:
+      version:
+        description: Plugin version to publish (empty = the version in gradle-plugin/build.gradle.kts)
+        type: string
+        required: false
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: "21"
+      - name: Build and test
+        working-directory: gradle-plugin
+        run: ./gradlew --no-daemon build
+
+  publish:
+    needs: build
+    if: startsWith(github.ref, 'refs/tags/plugin-v') || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    # Keep the Portal secrets in this environment (Settings > Environments) and add yourself as a
+    # required reviewer, like registry-signing.
+    environment: gradle-plugin-portal
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: "21"
+      - name: Version
+        id: version
+        env:
+          INPUT_VERSION: ${{ inputs.version }}
+        run: |
+          set -euo pipefail
+          if [[ "$GITHUB_REF" == refs/tags/plugin-v* ]]; then
+            version="${GITHUB_REF_NAME#plugin-v}"
+          else
+            version="$INPUT_VERSION"
+          fi
+          if [ -n "$version" ] && ! [[ "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+([-+][0-9A-Za-z.-]+)?$ ]]; then
+            echo "::error::version must look like 1.2.3, got '$version'"
+            exit 1
+          fi
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+      - name: Test and publish to the Gradle Plugin Portal
+        working-directory: gradle-plugin
+        env:
+          GRADLE_PUBLISH_KEY: ${{ secrets.GRADLE_PUBLISH_KEY }}
+          GRADLE_PUBLISH_SECRET: ${{ secrets.GRADLE_PUBLISH_SECRET }}
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          set -euo pipefail
+          if [ -z "$GRADLE_PUBLISH_KEY" ] || [ -z "$GRADLE_PUBLISH_SECRET" ]; then
+            echo "::error::the secrets GRADLE_PUBLISH_KEY and GRADLE_PUBLISH_SECRET are not set"
+            exit 1
+          fi
+          args=()
+          if [ -n "$VERSION" ]; then args=(-PpluginVersion="$VERSION"); fi
+          ./gradlew --no-daemon "${args[@]}" check publishPlugins

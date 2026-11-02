@@ -14,17 +14,18 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Check out the pull request
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
         with:
           path: pr
+          fetch-depth: 0 # submitter-check compares with the base commit
           persist-credentials: false
       - name: Check out the trusted tools from the base branch
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
         with:
           ref: ${{ github.event.pull_request.base.sha }}
           path: base
           persist-credentials: false
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v7
         with:
           python-version: "3.12"
       - name: Every registry file is valid TOML
@@ -55,3 +56,11 @@ jobs:
           else
             $bcz lint --registry pr
           fi
+      # Mods, releases and reviews may only be changed from the GitHub account linked to their
+      # publisher or reviewer; anything else (reviewer levels, keys, removing flags) fails here
+      # and needs a maintainer's look before merging.
+      - name: Every change belongs to the pull request's author
+        env:
+          LOGIN: ${{ github.event.pull_request.user.login }}
+          BASE: ${{ github.event.pull_request.base.sha }}
+        run: base/cli/build/install/bcz/bin/bcz submitter-check --registry pr --login "$LOGIN" --base "$BASE"

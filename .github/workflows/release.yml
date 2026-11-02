@@ -18,7 +18,7 @@ jobs:
     outputs:
       version: ${{ steps.version.outputs.version }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           persist-credentials: false
       - uses: actions/setup-java@v5
@@ -34,7 +34,7 @@ jobs:
           ./gradlew --no-daemon check :launcher:launcherZip :launcher:fatJar :cli:distZip \
             -PbitecheckVersion="${{ steps.version.outputs.version }}"
           test -f keys/registry.pub || echo "::warning::keys/registry.pub is missing: this launcher cannot verify any mod"
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: portable
           path: |
@@ -55,14 +55,14 @@ jobs:
           - { os: ubuntu-22.04, type: rpm, label: linux-x64 }
     runs-on: ${{ matrix.os }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           persist-credentials: false
       - uses: actions/setup-java@v5
         with:
           distribution: temurin
           java-version: "21"
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v8
         with:
           name: portable
           path: portable
@@ -92,7 +92,7 @@ jobs:
             mv "$f" "BiteCheck-${{ needs.build.outputs.version }}-${{ matrix.label }}.$ext"
           done
           ls -la
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: installer-${{ matrix.label }}-${{ matrix.type }}
           path: out/*
@@ -104,7 +104,7 @@ jobs:
     permissions:
       contents: write
     steps:
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v8
         with:
           path: artifacts
       - name: Collect and checksum
