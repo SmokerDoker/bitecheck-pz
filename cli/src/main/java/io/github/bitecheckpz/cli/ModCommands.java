@@ -44,8 +44,10 @@ final class ModCommands {
 
     // ---- commands ----
 
-    static int status(Args a, PrintStream out) throws IOException, Toml.TomlException, UsageException {
+    static int status(Args a, PrintStream out) throws IOException, Toml.TomlException, UsageException,
+            InterruptedException {
         Registry registry = registry(a);
+        tryPull(registry);
         String me = a.option("as").orElseGet(ModCommands::onlyKeyName);
         List<Path> mods;
         try (Stream<Path> files = Files.list(registry.modsDir())) {
@@ -66,6 +68,7 @@ final class ModCommands {
 
     static int inspect(Args a, PrintStream out) throws IOException, Toml.TomlException, UsageException,
             InterruptedException {
+        tryPull(registry(a));
         Target t = target(a);
         String source = Toml.string(t.modInfo, "source");
         String commit = Toml.string(t.release, "commit");
@@ -77,7 +80,7 @@ final class ModCommands {
             Files.createDirectories(dir.getParent());
             git(null, "clone", "--quiet", "--", source, dir.toString());
         }
-        if (git(dir, "cat-file", "-e", commit + "^{commit}") != 0) {
+        if (runGit(dir, "cat-file", "-e", commit + "^{commit}").code() != 0) {
             git(dir, "fetch", "--quiet", "origin");
         }
         git(dir, "-c", "advice.detachedHead=false", "checkout", "--quiet", "--force", commit);
@@ -164,7 +167,8 @@ final class ModCommands {
     }
 
     static int publish(Args a, PrintStream out) throws IOException, GeneralSecurityException, Toml.TomlException,
-            UsageException {
+            UsageException, InterruptedException {
+        pull(registry(a));
         Target t = target(a);
         String me = me(a);
         String signer = Registry.signer(t.modInfo);
@@ -183,17 +187,15 @@ final class ModCommands {
         if (!active.equals(modText)) {
             Files.writeString(t.modFile, active, StandardCharsets.UTF_8);
         }
-        out.println("Signed " + t.mod + " " + t.version + " as '" + me + "'"
-                + (active.equals(modText) ? "" : "; status is now active"));
-        out.println("Next: commit and push, e.g.");
-        out.println("  git add registry/mods/" + t.mod + " && git commit -m \"Publish " + t.mod + " " + t.version
-                + "\" && git push");
-        out.println("CI then writes the build record. After that: git pull, bcz approve " + t.mod);
+        commitAndPush(t.registry, t.mod, "Publish " + t.mod + " " + t.version);
+        out.println("Published " + t.mod + " " + t.version + ". CI now writes the build record (about a minute),");
+        out.println("then: bcz approve " + t.mod);
         return Main.OK;
     }
 
     static int review(Args a, PrintStream out, String verdict) throws IOException, GeneralSecurityException,
-            Toml.TomlException, UsageException {
+            Toml.TomlException, UsageException, InterruptedException {
+        pull(registry(a));
         Target t = target(a);
         String me = me(a);
         String problem = Registry.selfReviewProblem(t.modInfo, me, t.registry.policy());
@@ -204,8 +206,8 @@ final class ModCommands {
             throw new IOException(t.mod + " is still pending; the publisher runs 'bcz publish " + t.mod + "' first");
         }
         if (!Files.isRegularFile(t.registry.buildFile(t.mod, t.version))) {
-            throw new IOException("no build record for " + t.mod + " " + t.version
-                    + " yet; CI writes it after the release is pushed. Run 'git pull' and try again.");
+            throw new IOException("CI has not written the build record yet (about a minute after publish); "
+                    + "try again shortly");
         }
         if ("published".equals(Toml.string(Toml.table(t.release, "build"), "type"))) {
             // The review signs the build record; make sure it lists exactly the jars you inspected.
@@ -244,10 +246,8 @@ final class ModCommands {
             Files.deleteIfExists(Signatures.signaturePath(file));
             throw new IOException("your key does not match keys/reviewers/" + me + ".pub");
         }
-        out.println("Signed review of " + t.mod + " " + t.version + ": " + verdict + " by '" + me + "'");
-        out.println("Next: commit and push, e.g.");
-        out.println("  git add registry/mods/" + t.mod + " && git commit -m \"Review " + t.mod + " " + t.version
-                + ": " + verdict + "\" && git push");
+        commitAndPush(t.registry, t.mod, "Review " + t.mod + " " + t.version + ": " + verdict);
+        out.println((verdict.equals("approve") ? "Approved " : "Rejected ") + t.mod + " " + t.version + ".");
         return Main.OK;
     }
 
@@ -409,7 +409,45 @@ final class ModCommands {
         return Keys.readPrivate(file);
     }
 
-    private static int git(Path dir, String... args) throws IOException, InterruptedException {
+    /** Brings the registry checkout up to date, so you see and sign the current state. */
+    private static void pull(Registry registry) throws IOException, InterruptedException {
+        git(registry.root(), "pull", "--ff-only", "--autostash", "--quiet");
+    }
+
+    /** Like {@link #pull}, but offline or outside a clone the commands just show the local state. */
+    private static void tryPull(Registry registry) throws InterruptedException {
+        try {
+            pull(registry);
+        } catch (IOException e) {
+            // nothing to do: status and inspect only read the registry
+        }
+    }
+
+    /** Commits the mod's folder - and nothing else - and pushes it. */
+    private static void commitAndPush(Registry registry, String mod, String message)
+            throws IOException, InterruptedException {
+        Path root = registry.root();
+        String path = "registry/mods/" + mod;
+        git(root, "add", "--", path);
+        if (!git(root, "status", "--porcelain", "--", path).isEmpty()) {
+            git(root, "commit", "--quiet", "-m", message, "--", path);
+        }
+        git(root, "push", "--quiet");
+    }
+
+    private record GitResult(int code, String output) {
+    }
+
+    /** Runs git and returns its output; fails with git's own message if it does not succeed. */
+    private static String git(Path dir, String... args) throws IOException, InterruptedException {
+        GitResult r = runGit(dir, args);
+        if (r.code() != 0) {
+            throw new IOException("git " + args[0] + " failed" + (r.output().isEmpty() ? "" : ":\n" + r.output()));
+        }
+        return r.output();
+    }
+
+    private static GitResult runGit(Path dir, String... args) throws IOException, InterruptedException {
         List<String> command = new ArrayList<>(List.of("git"));
         if (dir != null) {
             command.addAll(List.of("-C", dir.toString()));
@@ -422,10 +460,6 @@ final class ModCommands {
             throw new IOException("git is needed for this command and was not found", e);
         }
         String output = new String(process.getInputStream().readAllBytes(), StandardCharsets.UTF_8).strip();
-        int code = process.waitFor();
-        if (code != 0 && (args[0].equals("clone") || List.of(args).contains("checkout"))) {
-            throw new IOException("git " + String.join(" ", args) + " failed" + (output.isEmpty() ? "" : ":\n" + output));
-        }
-        return code;
+        return new GitResult(process.waitFor(), output);
     }
 }

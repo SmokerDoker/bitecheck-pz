@@ -58,8 +58,9 @@ Run these inside the registry checkout; they only need the mod's id:
 bcz status                      # what is waiting for you
 bcz inspect <mod>               # source at the release commit in ~/.bitecheck/review/, scan, source check
 bcz approve <mod>               # or: bcz reject <mod> --notes "why"
-git add registry/mods/<mod> && git commit -m "Review <mod>" && git push
 ```
+
+`bcz publish`, `approve` and `reject` pull first, then commit only `registry/mods/<mod>` and push it.
 
 `bcz inspect` scans published jars itself; for a mod CI rebuilt, download the jar from the "Mod submission" run (artifact `mod-<mod>-<version>`) and run `bcz scan` on it. The commands sign with `~/.bitecheck/keys/<you>.key` (pass `--as <you>` if you have more than one key there). Without `--notes`, an approval says "Full review of the source at commit …"; add `--notes "…"` for anything else you checked.
 
