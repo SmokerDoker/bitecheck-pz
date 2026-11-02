@@ -133,8 +133,7 @@ final class ModCommands {
             }
             out.println();
             if (built.isEmpty()) {
-                out.println("SHA-256: no build record yet, so nothing to compare. CI writes it after 'bcz publish';");
-                out.println("         'bcz approve' compares these jars with it before signing.");
+                out.println("SHA-256: no build record yet, so nothing to compare");
             } else if (matching == artifacts.size()) {
                 out.println("SHA-256: all " + matching + " jars match the build record signed by CI");
             } else {
