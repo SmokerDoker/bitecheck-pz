@@ -1,0 +1,10 @@
+mod = "e2e-test"
+version = "0.0.2"
+commit = "0b8d96449a447627448530e8e00e409b101f816f"
+
+[build]
+type = "rebuild"
+jdk = "temurin-25"
+command = "cd template && ./gradlew --no-daemon bitecheckMod"
+artifacts = ["template/build/bitecheck/42/media/java/client/MyMod.jar"]
+game_branch = "unstable"

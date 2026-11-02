@@ -1,0 +1,8 @@
+# E2E TEST ONLY - not to be merged.
+id = "e2e-test"
+name = "E2E test"
+author = "smokerdoker"
+source = "https://github.com/SmokerDoker/bitecheck-pz"
+license = "MIT"
+workshop_id = ""
+status = "active"
