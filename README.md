@@ -48,9 +48,11 @@ The installers bring their own small Java runtime. `SHA256SUMS.txt` on the relea
 
 Submitting a mod should be no harder than publishing to the Workshop:
 
-1. Start from the mod template (or add the Gradle plugin to your project). It configures reproducible builds for you.
-2. Run `bcz keygen <name>` once to create your signing key (planned: `bcz login` links your GitHub account too).
-3. Tag a release and run `bcz submit` — or let the included GitHub Action do it on every release tag.
+1. Start from the [mod template](template/README.md) (or add the [Gradle plugin](gradle-plugin/README.md) `io.github.smokerdoker.bitecheck` to your project). It compiles against the game without bundling it and makes the build reproducible.
+2. Run `bcz login` once: it links your GitHub account (via the GitHub CLI) and creates your signing key.
+3. Tag a release and run `bcz submit` — or let the template's GitHub Action ([submit-action](submit-action/action.yml)) do it on every release tag.
+
+CI then builds your mod twice against the Project Zomboid dedicated server and compares the hashes. Details: [CONTRIBUTING.md](CONTRIBUTING.md).
 
 Your mod is never blocked while it waits for review: players can load it as an unverified mod with a warning.
 
@@ -69,9 +71,12 @@ Your mod is never blocked while it waits for review: players can load it as an u
 - [x] Start-up policy: one trusted review, publishers may review upstream mods (later two reviews, see `registry/policy.toml`)
 - [x] First three mods prepared as pending entries with preliminary reviews ([docs/reviews](docs/reviews/README.md))
 - [ ] First test with real players
-- [ ] Registry key set up ([docs/SETUP-REGISTRY.md](docs/SETUP-REGISTRY.md)) and first real mods
-- [ ] `bcz login` / `bcz submit` (GitHub integration), mod template and Gradle plugin
-- [ ] Key revocation, update diffs, reviewer reputation tooling
+- [x] Registry key set up ([docs/SETUP-REGISTRY.md](docs/SETUP-REGISTRY.md)); first verified mod: zb-hello-world
+- [x] `bcz login` / `bcz submit` (GitHub integration), [mod template](template/README.md), [Gradle plugin](gradle-plugin/README.md) and submit action
+- [x] CI rebuilds mods against the Project Zomboid dedicated server (SteamCMD)
+- [x] Reviewer commands: `bcz status`, `inspect` (with diffs to the last verified release), `approve`, `reject`, `flag`
+- [x] Key revocation (`keys/revoked.toml`), reviewer levels (`bcz trust`, `bcz reviewers`), ownership check for pull requests
+- [ ] Gradle plugin published to the Plugin Portal, template as its own repository
 
 ## The `bcz` command line tool
 
@@ -82,6 +87,10 @@ alias bcz=cli/build/install/bcz/bin/bcz     # or bcz.bat on Windows
 bcz status                                  # reviewers: what is next for every mod
 bcz inspect my-mod                          # source at the release commit, scan, source check
 bcz approve my-mod                          # sign your review (bcz publish my-mod: sign as publisher)
+bcz flag my-mod --severity critical --notes "…"   # report a problem with a release
+bcz login                                   # mod authors: link GitHub (gh CLI), create your key
+bcz submit                                  # mod authors: submit the tagged release in this folder
+bcz trust bob reviewer                      # maintainers: reviewer levels; bcz reviewers lists them
 
 bcz keygen alice                            # Ed25519 key pair; private key in ~/.bitecheck/keys/
 bcz sign registry/mods/my-mod/releases/1.0.0.toml --key ~/.bitecheck/keys/alice.key
@@ -118,11 +127,12 @@ keys/            Public keys of the registry, authors and reviewers
 | Workflow | When | What |
 | --- | --- | --- |
 | `build.yml` | every push / PR | tests, reproducible jars, launcher download as artifact |
-| `validate-registry.yml` | PRs touching the registry | TOML check, `bcz lint` with tools from the base branch |
+| `validate-registry.yml` | PRs touching the registry | TOML check, `bcz lint` and `bcz submitter-check` (changes belong to the PR's author), with tools from the base branch |
 | `submission.yml` | PRs adding a release | builds the mod twice on different runners, compares hashes, scans the jar |
 | `registry.yml` | merges to main, daily | rebuilds new releases, signs build records, publishes the signed index |
 | `site.yml` | registry changes, after `registry.yml` | registry website on GitHub Pages |
 | `release.yml` | tags `v*`, by hand | installers (msi, dmg, deb, rpm), portable zip and bcz; a tag publishes them as a GitHub release |
+| `gradle-plugin.yml` | changes to `gradle-plugin/`, tags `plugin-v*` | builds and tests the Gradle plugin; a tag publishes it to the Plugin Portal |
 
 Run the tests with `./gradlew check`.
 

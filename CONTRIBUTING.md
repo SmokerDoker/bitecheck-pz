@@ -4,65 +4,60 @@ Thanks for helping! There are three ways to contribute.
 
 ## 1. Submit a mod (modders)
 
-> The tooling is not ready yet. Until it is, open an issue titled `Mod submission: <mod name>` with a link to your public source repository and its license.
+1. Start from the [mod template](template/README.md) (once it is published: **Use this template** on `SmokerDoker/bitecheck-mod-template`). It uses the BiteCheck Gradle plugin, which compiles against the game's jar without bundling it and makes the jar reproducible. Make the repository public under a license that allows review and rebuilding (e.g. MIT, Apache 2.0, GPL).
+2. Install the [GitHub CLI](https://cli.github.com), run `gh auth login`, then `bcz login`. This creates your signing key in `~/.bitecheck/keys/` — back it up.
+3. Fill in `bitecheck.toml`, tag a release (`git tag v1.0.0 && git push --tags`) and run `bcz submit` in your mod's folder. It writes and signs the release file, registers your key and GitHub account with your first submission, and opens a pull request here.
+4. CI builds your mod twice against the Project Zomboid dedicated server, compares the hashes and scans the jar. A reviewer approves it (how many approvals are needed is set in `registry/policy.toml`), then it is merged.
 
-The planned flow:
+For later releases, the template's workflow (`.github/workflows/bitecheck.yml`, using [submit-action](submit-action/action.yml)) submits every `v*` tag automatically. It needs two repository secrets: `BITECHECK_AUTHOR_KEY` (the content of your `~/.bitecheck/keys/<you>.key`) and `BITECHECK_GITHUB_TOKEN` (a personal access token with `public_repo`, so it can open the pull request from your fork). See the template's README.
 
-1. Your mod's source code is public under a license that allows review and rebuilding (e.g. MIT, Apache 2.0, GPL).
-2. Your build is reproducible. The BiteCheck mod template / Gradle plugin sets this up for you.
-3. `bcz submit` opens a pull request in this repository with your signed release file. CI builds your mod twice, compares the hashes, runs the scanner and posts the results to the PR.
-4. A reviewer approves it (how many approvals are needed is set in `registry/policy.toml`), then it is merged.
+Your mod is never blocked while it waits: players can load it as an unverified mod with a warning.
 
 Requirements for a release:
 
 - No obfuscation.
 - No native libraries, no runtime code loading, no process execution.
 - Network access and file access outside `~/Zomboid` must be explained in the mod description and will be checked carefully in review.
-- Game classes from The Indie Stone are referenced at compile time only (`compileOnly`) and never bundled.
+- Game classes from The Indie Stone are referenced at compile time only (`compileOnly`) and never bundled. CI fails a build whose jar contains game classes.
 
-### Making your build reproducible
+### Without the template
 
-CI builds your release twice on different machines; both jars must be byte-identical. With Gradle this usually takes three lines:
+Any build works if it is reproducible: CI runs your `command` twice on different machines with `PZ_GAME_DIR` pointing to the dedicated server, and both jars must be byte-identical. With Gradle that means `isPreserveFileTimestamps = false` and `isReproducibleFileOrder = true` on archive tasks, a pinned wrapper, the JDK named in `bitecheck.toml`, pinned dependencies, and no dates or machine names in the jar. Check locally by building twice and comparing `bcz hash` of both jars.
 
-```kotlin
-tasks.withType<AbstractArchiveTask>().configureEach {
-    isPreserveFileTimestamps = false
-    isReproducibleFileOrder = true
-}
-```
-
-Also: pin your Gradle version with the wrapper, use the JDK named in your release file (`jdk = "temurin-25"`), don't put build dates or machine names into the jar, and pin dependency versions. Check locally by building twice and comparing `bcz hash` of both jars.
-
-Your release file (`registry/mods/<mod>/releases/<version>.toml`) names the exact commit and how to build it:
+`bitecheck.toml` at the root of your repository:
 
 ```toml
-mod = "my-mod"
-version = "1.0.0"
-commit = "<full 40-character commit hash>"
+id = "my-mod"
+name = "My Mod"
+license = "MIT"
+workshop_id = ""
 
 [build]
+type = "rebuild"
 jdk = "temurin-25"
-command = "./gradlew --no-daemon jar"
-artifact = "build/libs/my-mod.jar"
+command = "./gradlew --no-daemon bitecheckMod"
+artifacts = ["build/bitecheck/42/media/java/client/MyMod.jar"]
+# game_branch = "pre-release"   # optional Steam branch of the dedicated server
 ```
-
-Sign it with `bcz sign <file> --key ~/.bitecheck/keys/<you>.key` and open a pull request with both files (and `mod.toml` plus your `keys/authors/<you>.pub` for a new mod).
 
 ## 2. Review mods (reviewers)
 
 Anyone can review. Reviews from new accounts are visible but do not count toward approval until the reviewer has built up reputation (see the specification).
 
-Run these inside the registry checkout; they only need the mod's id:
+Set up once: `gh auth login`, then `bcz login` (creates your key); a maintainer adds your key to `keys/reviewers/` and sets your level with `bcz trust`. Then, inside the registry checkout:
 
 ```sh
 bcz status                      # what is waiting for you
 bcz inspect <mod>               # source at the release commit in ~/.bitecheck/review/, scan, source check
 bcz approve <mod>               # or: bcz reject <mod> --notes "why"
+bcz flag <mod> --severity critical --notes "what you found"
 ```
 
-`bcz publish`, `approve` and `reject` pull first, then commit only `registry/mods/<mod>` and push it.
+These commands pull first, commit only the mod's folder and push it — or, without write access to the registry, open a pull request from your fork.
 
-`bcz inspect` scans published jars itself; for a mod CI rebuilt, download the jar from the "Mod submission" run (artifact `mod-<mod>-<version>`) and run `bcz scan` on it. The commands sign with `~/.bitecheck/keys/<you>.key` (pass `--as <you>` if you have more than one key there). Without `--notes`, an approval says "Full review of the source at commit …"; add `--notes "…"` for anything else you checked.
+**Updates:** when the previous release is verified, `bcz inspect` shows what changed since then (source diff, changed classes per jar, new findings marked `(new)`). If you reviewed only those changes, approve with `bcz approve <mod> --scope diff`. A diff review counts only while the previous release stays verified.
+
+`bcz inspect` scans published jars itself; for a mod CI rebuilt, download the jar from the "Mod submission" run (artifact `mod-<mod>-<version>`) and run `bcz scan` on it. Without `--notes`, an approval says "Full review of the source at commit …"; add `--notes "…"` for anything else you checked.
 
 Publishers of upstream mods sign a prepared entry with `bcz publish <mod>`, which also marks it active.
 
