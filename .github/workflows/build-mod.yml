@@ -95,7 +95,7 @@ jobs:
         run: |
           set -euo pipefail
           branch="${GAME_BRANCH:-public}"
-          # a Steam beta branch name; it ends up on the SteamCMD command line
+          # a Steam beta branch name; it ends up on the DepotDownloader command line
           if ! [[ "$branch" =~ ^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$ ]]; then
             echo "::error::[build] game_branch may only contain letters, digits, '-', '_' and '.'"
             exit 1
@@ -134,12 +134,20 @@ jobs:
             sleep 15
           done
           cat "$log"
-          find "$dir" -name '*.jar' -not -path '*/.DepotDownloader/*'
           if [ "$installed" != true ]; then
             echo "::error::could not download projectzomboid.jar (Steam app 380870, branch $BRANCH)"
             exit 1
           fi
-          manifests="$(grep -oE 'Manifest [0-9]+' "$log" | awk '{print $2}' | sort -u | paste -sd, -)"
+          # DepotDownloader silently falls back to "public" for a branch it cannot find
+          if grep -q 'does not have branch named' "$log"; then
+            echo "::error::Steam app 380870 has no public branch '$BRANCH' ([build] game_branch); password-protected branches are not supported"
+            exit 1
+          fi
+          # depot:manifest pairs, from "Processing depot D" + "Manifest M (date)" or "Already have manifest M for depot D"
+          manifests="$(awk '/^Processing depot [0-9]+$/ {d=$3}
+            /^Manifest [0-9]+ / && d {print d ":" $2}
+            /^Already have manifest [0-9]+ for depot [0-9]+/ {sub(/\.$/, "", $7); print $7 ":" $4}' "$log" \
+            | sort -u | paste -sd, -)"
           if [ -z "$manifests" ]; then
             echo "::error::no depot manifest id in the DepotDownloader output"
             exit 1
