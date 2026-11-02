@@ -236,7 +236,10 @@ final class ModCommands {
 
     private static Target target(Args a) throws IOException, Toml.TomlException, UsageException {
         Registry registry = registry(a);
-        String mod = a.positional(0, "mod");
+        if (a.positionals.isEmpty()) {
+            throw new UsageException("which mod? e.g. 'bcz " + a.command + " zb-hello-world' ('bcz status' lists them)");
+        }
+        String mod = a.positionals.get(0);
         Registry.requireName(mod, "mod");
         Path modFile = registry.modDir(mod).resolve("mod.toml");
         if (!Files.isRegularFile(modFile)) {
@@ -255,14 +258,25 @@ final class ModCommands {
                 registry.read(releaseFile));
     }
 
-    /** The registry checkout: --registry, or the first parent of the current directory that has one. */
+    /**
+     * The registry checkout: --registry, else the first parent of the current directory that has
+     * one, else the checkout this bcz was built in (cli/build/install/bcz/lib/cli.jar).
+     */
     private static Registry registry(Args a) throws UsageException {
         if (a.option("registry").isPresent()) {
             return new Registry(Path.of(a.option("registry").get()));
         }
-        for (Path dir = Path.of("").toAbsolutePath(); dir != null; dir = dir.getParent()) {
-            if (Files.isDirectory(dir.resolve("registry/mods")) && Files.isDirectory(dir.resolve("keys"))) {
-                return new Registry(dir);
+        List<Path> starts = new ArrayList<>(List.of(Path.of("").toAbsolutePath()));
+        try {
+            starts.add(Path.of(ModCommands.class.getProtectionDomain().getCodeSource().getLocation().toURI()));
+        } catch (Exception e) {
+            // no code location (unusual class loader): only the current directory is searched
+        }
+        for (Path start : starts) {
+            for (Path dir = start; dir != null; dir = dir.getParent()) {
+                if (Files.isDirectory(dir.resolve("registry/mods")) && Files.isDirectory(dir.resolve("keys"))) {
+                    return new Registry(dir);
+                }
             }
         }
         throw new UsageException("run this inside the BiteCheck registry checkout, or pass --registry <dir>");
