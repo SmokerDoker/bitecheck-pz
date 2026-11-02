@@ -11,6 +11,7 @@ import io.github.bitecheckpz.core.Scanner;
 import io.github.bitecheckpz.core.Signatures;
 import io.github.bitecheckpz.core.SourceCheck;
 import io.github.bitecheckpz.core.Toml;
+import io.github.bitecheckpz.core.Verifier;
 
 import java.io.IOException;
 import java.io.PrintStream;
@@ -20,8 +21,10 @@ import java.nio.file.Path;
 import java.security.GeneralSecurityException;
 import java.util.ArrayList;
 import java.util.Comparator;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.stream.Stream;
 
 /**
@@ -78,18 +81,28 @@ final class ModCommands {
         Path dir = reviewDir(t);
         if (!Files.isDirectory(dir.resolve(".git"))) {
             Files.createDirectories(dir.getParent());
-            git(null, "clone", "--quiet", "--", source, dir.toString());
+            Exec.git(null, "clone", "--quiet", "--", source, dir.toString());
         }
-        if (runGit(dir, "cat-file", "-e", commit + "^{commit}").code() != 0) {
-            git(dir, "fetch", "--quiet", "origin");
+        if (Exec.tryGit(dir, "cat-file", "-e", commit + "^{commit}").code() != 0) {
+            Exec.git(dir, "fetch", "--quiet", "origin");
         }
-        git(dir, "-c", "advice.detachedHead=false", "checkout", "--quiet", "--force", commit);
+        Exec.git(dir, "-c", "advice.detachedHead=false", "checkout", "--quiet", "--force", commit);
         out.println(t.mod + " " + t.version + "  (" + source.replaceFirst("^https://github\\.com/", "") + " @ "
                 + commit.substring(0, 7) + ")");
         out.println("Source: " + dir);
+        String previous = t.registry.previousVersion(t.mod, t.version);
+        String base = previous == null ? null : verifiedCommit(t.registry, t.mod, previous);
+        if (base != null) {
+            String stat = Exec.git(dir, "diff", "--shortstat", base, commit);
+            out.println("Changes since " + previous + " (verified): " + (stat.isEmpty() ? "none" : stat.strip()));
+            out.println("  git -C \"" + dir + "\" diff " + base.substring(0, 7) + " " + commit.substring(0, 7));
+        } else if (previous != null) {
+            out.println("Previous release " + previous + " is not verified: review everything");
+        }
         out.println();
         int result = Main.OK;
         if ("published".equals(Toml.string(Toml.table(t.release, "build"), "type"))) {
+            Set<String> oldFindings = new HashSet<>();
             Path buildFile = t.registry.buildFile(t.mod, t.version);
             List<String> built = Files.isRegularFile(buildFile) ? Registry.jarHashes(t.registry.read(buildFile))
                     : List.of();
@@ -116,16 +129,28 @@ final class ModCommands {
                 long hard = report.count(Scanner.Severity.HARD);
                 long softCount = report.count(Scanner.Severity.SOFT);
                 boolean bad = hard > 0 || !src.ok() || !inBuild;
+                String changes = "";
+                if (base != null) {
+                    // Compare with the same jar in the verified previous release.
+                    Path oldJar = Files.createTempFile("bcz-previous", ".jar");
+                    try {
+                        if (Exec.gitToFile(dir, oldJar, "show", base + ":" + artifact)) {
+                            changes = classChanges(classHashes(oldJar), classHashes(jar));
+                            Scanner.scan(oldJar).findings().forEach(f -> oldFindings.add(findingText(f)));
+                        } else {
+                            changes = ", new jar";
+                        }
+                    } finally {
+                        Files.deleteIfExists(oldJar);
+                    }
+                }
                 out.println("  " + (bad ? "!!" : softCount > 0 ? "??" : "OK") + "  " + name + "  "
-                        + report.classCount() + (report.classCount() == 1 ? " class" : " classes")
+                        + report.classCount() + (report.classCount() == 1 ? " class" : " classes") + changes
                         + (hard > 0 ? ", " + hard + " hard" : "") + (softCount > 0 ? ", " + softCount + " soft" : "")
                         + (src.ok() ? "" : ", no source for " + String.join(", ", src.classesWithoutSource()))
                         + (inBuild ? "" : ", NOT the jar in the build record"));
                 for (Scanner.Finding f : report.findings()) {
-                    String cls = f.where().substring(f.where().lastIndexOf('.') + 1);
-                    String what = String.join(", ", java.util.Arrays.stream(f.detail().split("; "))
-                            .map(d -> d.replaceFirst(" \\(.*\\)$", "")).distinct().toList());
-                    findings.putIfAbsent(f.rule() + "  " + cls + ": " + what, f.severity());
+                    findings.putIfAbsent(findingText(f), f.severity());
                 }
                 soft |= softCount > 0;
                 if (hard > 0) {
@@ -147,23 +172,78 @@ final class ModCommands {
                 out.println();
                 out.println("Findings (explain each one in your review):");
                 findings.forEach((text, severity) -> out.println("  " + (severity == Scanner.Severity.HARD
-                        ? "!!" : "??") + "  " + text));
+                        ? "!!" : "??") + "  " + text + (base != null && !oldFindings.contains(text) ? "  (new)" : "")));
             }
+            String approve = "bcz approve " + t.mod + (base != null ? " --scope diff" : "");
             out.println();
             out.println(!built.isEmpty() && matching != artifacts.size()
                     ? "Do not approve: bcz reject " + t.mod + " --notes \"jars do not match the build record\""
                     : result != Main.OK
-                    ? "Check the !! lines, then: bcz approve " + t.mod + "  or  bcz reject " + t.mod + " --notes \"why\""
+                    ? "Check the !! lines, then: " + approve + "  or  bcz reject " + t.mod + " --notes \"why\""
                     : "pending".equals(Toml.string(t.modInfo, "status")) ? "Next: bcz publish " + t.mod
-                            + " (publisher), then after CI: bcz approve " + t.mod
-                    : soft ? "Next: bcz approve " + t.mod + " --notes \"why the findings are fine\""
-                    : "Next: bcz approve " + t.mod);
+                            + " (publisher), then after CI: " + approve
+                    : soft ? "Next: " + approve + " --notes \"why the findings are fine\""
+                    : "Next: " + approve);
         } else {
             out.println("  CI builds this jar; run 'bcz scan' on the jar of the 'Mod submission' run.");
             out.println();
-            out.println("Next: bcz approve " + t.mod);
+            out.println("Next: bcz approve " + t.mod + (base != null ? " --scope diff" : ""));
         }
         return result;
+    }
+
+    /** The commit of {@code version} if every jar of it is VERIFIED, otherwise null. */
+    private static String verifiedCommit(Registry registry, String mod, String version)
+            throws IOException, Toml.TomlException {
+        Path build = registry.buildFile(mod, version);
+        var key = registry.registryKey();
+        if (!Files.isRegularFile(build) || key.isEmpty()) {
+            return null;
+        }
+        List<String> jars = Registry.jarHashes(registry.read(build));
+        Verifier verifier = new Verifier(registry, key.get());
+        for (String jar : jars) {
+            if (verifier.verifyHash(jar).status() != Verifier.Status.VERIFIED) {
+                return null;
+            }
+        }
+        return jars.isEmpty() ? null : Toml.string(registry.read(registry.releaseFile(mod, version)), "commit");
+    }
+
+    /** SHA-256 of every class in a jar, by entry name. */
+    private static Map<String, String> classHashes(Path jar) throws IOException {
+        Map<String, String> hashes = new java.util.TreeMap<>();
+        try (java.util.zip.ZipFile zip = new java.util.zip.ZipFile(jar.toFile())) {
+            for (var entry : java.util.Collections.list(zip.entries())) {
+                if (entry.getName().endsWith(".class")) {
+                    try (var in = zip.getInputStream(entry)) {
+                        hashes.put(entry.getName(), Hashing.sha256Hex(in.readAllBytes()));
+                    }
+                }
+            }
+        }
+        return hashes;
+    }
+
+    /** ", 2 changed, 1 new, 1 removed" compared with the previous jar, or ", unchanged". */
+    private static String classChanges(Map<String, String> before, Map<String, String> after) {
+        long changed = after.keySet().stream().filter(c -> before.containsKey(c) && !before.get(c).equals(after.get(c)))
+                .count();
+        long added = after.keySet().stream().filter(c -> !before.containsKey(c)).count();
+        long removed = before.keySet().stream().filter(c -> !after.containsKey(c)).count();
+        if (changed + added + removed == 0) {
+            return ", unchanged";
+        }
+        return (changed > 0 ? ", " + changed + " changed" : "") + (added > 0 ? ", " + added + " new" : "")
+                + (removed > 0 ? ", " + removed + " removed" : "");
+    }
+
+    /** One finding as one short line, the same for every jar it appears in. */
+    private static String findingText(Scanner.Finding f) {
+        String cls = f.where().substring(f.where().lastIndexOf('.') + 1);
+        String what = String.join(", ", java.util.Arrays.stream(f.detail().split("; "))
+                .map(d -> d.replaceFirst(" \\(.*\\)$", "")).distinct().toList());
+        return f.rule() + "  " + cls + ": " + what;
     }
 
     static int publish(Args a, PrintStream out) throws IOException, GeneralSecurityException, Toml.TomlException,
@@ -187,7 +267,7 @@ final class ModCommands {
         if (!active.equals(modText)) {
             Files.writeString(t.modFile, active, StandardCharsets.UTF_8);
         }
-        commitAndPush(t.registry, t.mod, "Publish " + t.mod + " " + t.version);
+        commitAndPush(out, t.registry, "Publish " + t.mod + " " + t.version, "registry/mods/" + t.mod);
         if (Files.isRegularFile(t.registry.buildFile(t.mod, t.version))) {
             out.println("Published " + t.mod + " " + t.version + ". Next: bcz approve " + t.mod);
         } else {
@@ -234,6 +314,13 @@ final class ModCommands {
         var publicKey = t.registry.reviewerKey(me)
                 .orElseThrow(() -> new IOException("no keys/reviewers/" + me + ".pub in the registry"));
         String scope = a.option("scope").orElse("full");
+        if (scope.equals("diff")) {
+            String previous = t.registry.previousVersion(t.mod, t.version);
+            if (previous == null || verifiedCommit(t.registry, t.mod, previous) == null) {
+                throw new IOException(previous == null ? "this is the first release: review it fully"
+                        : "the previous release " + previous + " is not verified: review everything (without --scope diff)");
+            }
+        }
         String notes = a.option("notes").orElse(null);
         if (notes == null) {
             if (!verdict.equals("approve")) {
@@ -250,8 +337,37 @@ final class ModCommands {
             Files.deleteIfExists(Signatures.signaturePath(file));
             throw new IOException("your key does not match keys/reviewers/" + me + ".pub");
         }
-        commitAndPush(t.registry, t.mod, "Review " + t.mod + " " + t.version + ": " + verdict);
+        commitAndPush(out, t.registry, "Review " + t.mod + " " + t.version + ": " + verdict, "registry/mods/" + t.mod);
         out.println((verdict.equals("approve") ? "Approved " : "Rejected ") + t.mod + " " + t.version + ".");
+        return Main.OK;
+    }
+
+    /** Reports a problem with a release: an open flag that covers every jar of that version. */
+    static int flag(Args a, PrintStream out) throws IOException, Toml.TomlException, UsageException,
+            InterruptedException {
+        pull(registry(a));
+        Target t = target(a);
+        String severity = a.option("severity").orElse("suspicion");
+        if (!List.of("info", "suspicion", "critical").contains(severity)) {
+            throw new UsageException("--severity must be info, suspicion or critical");
+        }
+        String notes = a.option("notes").orElseThrow(() -> new UsageException("say what you found with --notes \"...\""));
+        String reporter = a.option("as").orElseGet(ModCommands::onlyKeyName);
+        Path dir = t.registry.flagsDir(t.mod);
+        Files.createDirectories(dir);
+        int n = 1;
+        while (Files.exists(dir.resolve(t.version + "-" + n + ".toml"))) {
+            n++;
+        }
+        Path file = dir.resolve(t.version + "-" + n + ".toml");
+        Files.writeString(file, "mod = " + Toml.quote(t.mod) + "\nversion = " + Toml.quote(t.version)
+                + "\nseverity = " + Toml.quote(severity) + "\nstatus = \"open\"\ndescription = " + Toml.quote(notes)
+                + (reporter == null ? "" : "\nreported_by = " + Toml.quote(reporter))
+                + "\nreported_at = " + Toml.quote(java.time.Instant.now().truncatedTo(java.time.temporal.ChronoUnit.SECONDS)
+                        .toString()) + "\n", StandardCharsets.UTF_8);
+        commitAndPush(out, t.registry, "Flag " + t.mod + " " + t.version + ": " + severity, "registry/mods/" + t.mod);
+        out.println("Flagged " + t.mod + " " + t.version + " (" + severity + ")"
+                + (severity.equals("critical") ? ": players are warned until it is resolved." : "."));
         return Main.OK;
     }
 
@@ -316,7 +432,7 @@ final class ModCommands {
      * The registry checkout: --registry, else the first parent of the current directory that has
      * one, else the checkout this bcz was built in (cli/build/install/bcz/lib/cli.jar).
      */
-    private static Registry registry(Args a) throws UsageException {
+    static Registry registry(Args a) throws UsageException {
         if (a.option("registry").isPresent()) {
             return new Registry(Path.of(a.option("registry").get()));
         }
@@ -338,33 +454,8 @@ final class ModCommands {
 
     /** Newest release of a mod by version order, or null. */
     private static String latestVersion(Registry registry, String mod) throws IOException {
-        Path releases = registry.modDir(mod).resolve("releases");
-        if (!Files.isDirectory(releases)) {
-            return null;
-        }
-        try (Stream<Path> files = Files.list(releases)) {
-            return files.map(p -> p.getFileName().toString())
-                    .filter(n -> n.endsWith(".toml") && !n.endsWith(".build.toml"))
-                    .map(n -> n.substring(0, n.length() - ".toml".length()))
-                    .max(ModCommands::compareVersions).orElse(null);
-        }
-    }
-
-    /** Compares versions part by part, numbers numerically: 1.10 > 1.9, 2026.10.04 > 2026.9.30. */
-    static int compareVersions(String x, String y) {
-        String[] a = x.split("[.+_-]");
-        String[] b = y.split("[.+_-]");
-        for (int i = 0; i < Math.max(a.length, b.length); i++) {
-            String p = i < a.length ? a[i] : "";
-            String q = i < b.length ? b[i] : "";
-            int c = p.matches("\\d{1,18}") && q.matches("\\d{1,18}")
-                    ? Long.compare(Long.parseLong(p), Long.parseLong(q))
-                    : p.compareTo(q);
-            if (c != 0) {
-                return c;
-            }
-        }
-        return 0;
+        List<String> versions = registry.versions(mod);
+        return versions.isEmpty() ? null : versions.get(versions.size() - 1);
     }
 
     /** Where 'bcz inspect' checks out a release's source. */
@@ -372,23 +463,31 @@ final class ModCommands {
         return home().resolve("review").resolve(t.mod + "-" + t.version);
     }
 
-    private static Path home() {
+    static Path home() {
         return Path.of(System.getProperty("user.home"), ".bitecheck");
     }
 
-    /** Your name: --as, or the only personal key in ~/.bitecheck/keys. */
-    private static String me(Args a) throws UsageException {
+    /** Your name: --as, the name 'bcz login' saved, or the only personal key in ~/.bitecheck/keys. */
+    static String me(Args a) throws UsageException {
         if (a.option("as").isPresent()) {
             return a.option("as").get();
         }
         String name = onlyKeyName();
         if (name == null) {
-            throw new UsageException("cannot tell who you are: pass --as <name> (your key is ~/.bitecheck/keys/<name>.key)");
+            throw new UsageException("cannot tell who you are: run 'bcz login' or pass --as <name>");
         }
         return name;
     }
 
-    private static String onlyKeyName() {
+    static String onlyKeyName() {
+        try {
+            String saved = Toml.string(Toml.parse(home().resolve("config.toml")), "name");
+            if (saved != null && Registry.NAME.matcher(saved).matches()) {
+                return saved;
+            }
+        } catch (IOException | Toml.TomlException e) {
+            // no saved login: fall back to the only key
+        }
         Path dir = home().resolve("keys");
         if (!Files.isDirectory(dir)) {
             return null;
@@ -404,7 +503,7 @@ final class ModCommands {
         }
     }
 
-    private static Keys.PrivateKeyInfo privateKey(String me) throws IOException, GeneralSecurityException {
+    static Keys.PrivateKeyInfo privateKey(String me) throws IOException, GeneralSecurityException {
         Registry.requireName(me, "name");
         Path file = home().resolve("keys").resolve(me + ".key");
         if (!Files.isRegularFile(file)) {
@@ -414,12 +513,12 @@ final class ModCommands {
     }
 
     /** Brings the registry checkout up to date, so you see and sign the current state. */
-    private static void pull(Registry registry) throws IOException, InterruptedException {
-        git(registry.root(), "pull", "--ff-only", "--autostash", "--quiet");
+    static void pull(Registry registry) throws IOException, InterruptedException {
+        Exec.git(registry.root(), "pull", "--ff-only", "--autostash", "--quiet");
     }
 
     /** Like {@link #pull}, but offline or outside a clone the commands just show the local state. */
-    private static void tryPull(Registry registry) throws InterruptedException {
+    static void tryPull(Registry registry) throws InterruptedException {
         try {
             pull(registry);
         } catch (IOException e) {
@@ -427,43 +526,33 @@ final class ModCommands {
         }
     }
 
-    /** Commits the mod's folder - and nothing else - and pushes it. */
-    private static void commitAndPush(Registry registry, String mod, String message)
+    /**
+     * Commits the given registry paths - and nothing else - and pushes them. Without write access
+     * to the registry, the commit goes to a pull request from your fork instead.
+     */
+    static void commitAndPush(PrintStream out, Registry registry, String message, String... paths)
             throws IOException, InterruptedException {
         Path root = registry.root();
-        String path = "registry/mods/" + mod;
-        git(root, "add", "--", path);
-        if (!git(root, "status", "--porcelain", "--", path).isEmpty()) {
-            git(root, "commit", "--quiet", "-m", message, "--", path);
+        List<String> add = new ArrayList<>(List.of("add", "--"));
+        add.addAll(List.of(paths));
+        Exec.git(root, add.toArray(String[]::new));
+        List<String> status = new ArrayList<>(List.of("status", "--porcelain", "--"));
+        status.addAll(List.of(paths));
+        if (!Exec.git(root, status.toArray(String[]::new)).isEmpty()) {
+            List<String> commit = new ArrayList<>(List.of("commit", "--quiet", "-m", message, "--"));
+            commit.addAll(List.of(paths));
+            Exec.git(root, commit.toArray(String[]::new));
         }
-        git(root, "push", "--quiet");
-    }
-
-    private record GitResult(int code, String output) {
-    }
-
-    /** Runs git and returns its output; fails with git's own message if it does not succeed. */
-    private static String git(Path dir, String... args) throws IOException, InterruptedException {
-        GitResult r = runGit(dir, args);
-        if (r.code() != 0) {
-            throw new IOException("git " + args[0] + " failed" + (r.output().isEmpty() ? "" : ":\n" + r.output()));
+        Exec.Result push = Exec.tryGit(root, "push", "--quiet");
+        if (push.code() == 0) {
+            return;
         }
-        return r.output();
-    }
-
-    private static GitResult runGit(Path dir, String... args) throws IOException, InterruptedException {
-        List<String> command = new ArrayList<>(List.of("git"));
-        if (dir != null) {
-            command.addAll(List.of("-C", dir.toString()));
+        if (!push.output().matches("(?s).*(403|[Pp]ermission|denied|not allowed|protected branch).*")) {
+            throw new IOException("git push failed:\n" + push.output());
         }
-        command.addAll(List.of(args));
-        Process process;
-        try {
-            process = new ProcessBuilder(command).redirectErrorStream(true).start();
-        } catch (IOException e) {
-            throw new IOException("git is needed for this command and was not found", e);
-        }
-        String output = new String(process.getInputStream().readAllBytes(), StandardCharsets.UTF_8).strip();
-        return new GitResult(process.waitFor(), output);
+        String url = PullRequests.open(root, message);
+        // The commit now lives in the pull request; keep the local branch equal to the registry.
+        Exec.git(root, "reset", "--quiet", "--keep", "@{u}");
+        out.println("Pull request: " + url);
     }
 }
