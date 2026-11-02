@@ -1,0 +1,8 @@
+mod = "zb-hello-world"
+version = "2026.10.04"
+build_sha256 = "7f6b4dc054ec5c4be2a9fba9640b8e225938ae737066b6d323c7e1f00cf0b4a6"
+reviewer = "smokerdoker"
+verdict = "approve"
+scope = "full"
+reviewed_at = "2026-11-02T03:21:01Z"
+notes = "Full review of the source at commit c5c637d, scan and source check."
