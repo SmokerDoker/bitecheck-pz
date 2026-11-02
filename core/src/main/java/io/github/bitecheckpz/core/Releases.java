@@ -28,6 +28,22 @@ public final class Releases {
         return result;
     }
 
+    /**
+     * For a "workshop" release: where each artifact is inside the Steam Workshop item
+     * ([build] workshop_artifacts = [...], in the order of {@link #artifacts}).
+     */
+    public static List<String> workshopArtifacts(Map<String, Object> release) {
+        List<String> result = new ArrayList<>();
+        if (Toml.table(release, "build").get("workshop_artifacts") instanceof List<?> list) {
+            for (Object o : list) {
+                if (o instanceof String s) {
+                    result.add(s);
+                }
+            }
+        }
+        return result;
+    }
+
     /** True if a path is a safe relative path inside a repository (no spaces, no '..'). */
     public static boolean isSafeArtifactPath(String path) {
         return path != null && path.matches("[A-Za-z0-9._/+-]+") && !path.startsWith("/")

@@ -367,6 +367,50 @@ public final class SelfTest {
             expect(ModLayout.problems(repo, List.of("../42/media/java/$(rm -rf ~).jar")),
                     List.of("an artifact path is not a safe relative path to a .jar"));
         });
+        run("jar-compare: same files match, whatever the manifest, timestamps and order", () -> {
+            Path built = zipOf(Map.of("a/A.class", "A", "a/B.class", "B", "META-INF/MANIFEST.MF", "Built-By: ci"), 0L);
+            Path same = zipOf(Map.of("a/B.class", "B", "META-INF/MANIFEST.MF", "Built-By: someone", "a/A.class", "A"),
+                    1_700_000_000_000L);
+            Path extra = zipOf(Map.of("a/A.class", "A", "a/B.class", "B", "a/Evil.class", "E"), 0L);
+            Path changed = zipOf(Map.of("a/A.class", "A2", "a/B.class", "B"), 0L);
+            expect(JarCompare.differences(built, same), List.of());
+            expect(JarCompare.differences(built, extra), List.of("a/Evil.class: not built from the source"));
+            expect(JarCompare.differences(built, changed), List.of("a/A.class: differs"));
+        });
+        run("workshop release: lint, build record of the Workshop jar, VERIFIED", () -> {
+            Fixture f = Fixture.create();
+            Path dir = f.dir.resolve("registry/mods/stairs");
+            Files.createDirectories(dir.resolve("releases"));
+            Files.writeString(dir.resolve("mod.toml"), "id = \"stairs\"\nname = \"Stairs\"\nauthor = \"Someone\"\n"
+                    + "publisher = \"alice\"\nsource = \"https://example.invalid/stairs\"\nlicense = \"MIT\"\n"
+                    + "workshop_id = \"3684713089\"\nstatus = \"active\"\n");
+            Path release = dir.resolve("releases/1.1.0.toml");
+            Files.writeString(release, "mod = \"stairs\"\nversion = \"1.1.0\"\n"
+                    + "commit = \"0123456789abcdef0123456789abcdef01234567\"\n[build]\ntype = \"workshop\"\n"
+                    + "workshop_id = \"3684713089\"\njdk = \"temurin-25\"\ncommand = \"mvn -B package\"\n"
+                    + "artifacts = [\"Contents/mods/Stairs/42.13/media/java/client/stairs.jar\"]\n"
+                    + "workshop_artifacts = [\"mods/Stairs/42.13/media/java/client/stairs.jar\"]\n");
+            Signatures.sign(release, f.author);
+            expect(Lint.check(f.registry(), java.util.Optional.of(f.registryKey)), List.of());
+            Path workshopJar = f.dir.resolve("stairs.jar");
+            Files.writeString(workshopJar, "jar from the Workshop");
+            Path build = Records.writeBuildRecord(release, List.of(workshopJar), List.of("a", "b"));
+            Signatures.sign(build, f.registry);
+            Map<String, Object> record = Toml.parse(build);
+            expect(Toml.string(record, "method"), "workshop");
+            expect(String.valueOf(record.get("artifact_paths")), "[mods/Stairs/42.13/media/java/client/stairs.jar]");
+            for (var reviewer : List.of(Map.entry("bob", f.bob), Map.entry("carol", f.carol))) {
+                Signatures.sign(Records.writeReview(release, null, reviewer.getKey(), "approve", "full", "ok"),
+                        reviewer.getValue());
+            }
+            Verifier.Result r = new Verifier(f.registry(), f.registryKey).verify(workshopJar);
+            expect(r.status(), Verifier.Status.VERIFIED);
+            expect(r.method(), "workshop");
+            // A workshop release needs the Workshop item and one path in it per artifact.
+            Files.writeString(release, Files.readString(release).replace("workshop_artifacts", "other"));
+            expect(Lint.check(f.registry(), java.util.Optional.of(f.registryKey)).stream()
+                    .anyMatch(p -> p.contains("workshop_artifacts needs one path")), true);
+        });
         run("source-check: classes match their sources; extra class is reported", () -> {
             Path src = Files.createTempDirectory("bcz-src");
             Files.writeString(src.resolve("A.java"), "package x.y;\n// class Fake {}\npublic class A {\n"
@@ -492,6 +536,21 @@ public final class SelfTest {
                 // ok
             }
         }
+    }
+
+    /** A temporary jar with the given files (name -> content), all with the given modification time. */
+    private static Path zipOf(Map<String, String> files, long time) throws IOException {
+        Path jar = Files.createTempFile("bcz-compare", ".jar");
+        try (var zip = new java.util.zip.ZipOutputStream(Files.newOutputStream(jar))) {
+            for (var e : files.entrySet()) {
+                var entry = new java.util.zip.ZipEntry(e.getKey());
+                entry.setTime(time);
+                zip.putNextEntry(entry);
+                zip.write(e.getValue().getBytes(StandardCharsets.UTF_8));
+                zip.closeEntry();
+            }
+        }
+        return jar;
     }
 
     /** Packs one fixture class from the test classpath into a temporary jar. */
