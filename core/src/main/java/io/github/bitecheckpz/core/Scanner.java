@@ -104,6 +104,23 @@ public final class Scanner {
             new Object[] {"java/lang/System.exit", new Rule(Severity.SOFT, "system", "can terminate the game")},
             new Object[] {"java/lang/Runtime.halt", new Rule(Severity.SOFT, "system", "can terminate the game")});
 
+    // ---- Java made callable from Lua: every Lua mod can then use it, outside the Lua sandbox ----
+
+    /** Annotation types (descriptors) that expose a class or method to Lua. */
+    private static final List<Object[]> LUA_ANNOTATIONS = List.of(
+            new Object[] {"se/krka/kahlua/integration/annotations/LuaMethod", "Lua can call its @LuaMethod methods"},
+            new Object[] {"me/zed_0xff/zombie_buddy/Exposer*", "exposes the class to Lua (ZombieBuddy @Exposer)"});
+
+    /** Referenced classes and members that hand Java code to Lua. */
+    private static final List<Object[]> LUA_REFERENCES = List.of(
+            new Object[] {"se/krka/kahlua/vm/JavaFunction", "is or registers a Lua function written in Java"},
+            new Object[] {"me/zed_0xff/zombie_buddy/Exposer.expose*", "exposes methods to Lua"},
+            new Object[] {"zombie/Lua/LuaManager$Exposer.setExposed", "exposes classes to Lua"},
+            new Object[] {"zombie/Lua/LuaManager$Exposer.exposeGlobalFunctions", "exposes global functions to Lua"});
+
+    /** Rules whose findings, in a class Lua can call, mean Lua may reach them too. */
+    private static final Set<String> LUA_SENSITIVE = Set.of("files", "network", "reflection", "system", "serialization");
+
     // ---- suspicious string constants (case-insensitive substring) ----
 
     private static final List<String> SENSITIVE_STRINGS = List.of(
@@ -174,11 +191,40 @@ public final class Scanner {
             add(findings, seen, new Finding(Severity.SOFT, "obfuscation", "(jar)",
                     obfuscatedNames + " of " + classCount + " classes have very short names"));
         }
+        addLuaAccess(findings, seen);
         List<Finding> grouped = group(findings);
         grouped.sort((a, b) -> a.severity() != b.severity()
                 ? a.severity().compareTo(b.severity())
                 : (a.rule() + a.where()).compareTo(b.rule() + b.where()));
         return new Report(Hashing.sha256Hex(jar), classCount, grouped);
+    }
+
+    /**
+     * For every class Lua can call: what it and its nested classes do themselves (files, network,
+     * reflection, ...), Lua can probably make it do. The method handles of string concatenation
+     * and lambdas do not count. A class-level hint, not a data-flow analysis: helper classes the
+     * exposed class calls are not followed.
+     */
+    private static void addLuaAccess(List<Finding> findings, Set<String> seen) {
+        Set<String> exposed = new LinkedHashSet<>();
+        for (Finding f : findings) {
+            if (f.rule().equals("lua")) {
+                exposed.add(f.where());
+            }
+        }
+        for (String cls : exposed) {
+            Set<String> reached = new LinkedHashSet<>();
+            for (Finding f : findings) {
+                if ((f.where().equals(cls) || f.where().startsWith(cls + "$")) && LUA_SENSITIVE.contains(f.rule())
+                        && !f.detail().startsWith("uses method handles")) {
+                    reached.add(f.detail().replaceFirst(" \\(.*$", ""));
+                }
+            }
+            if (!reached.isEmpty()) {
+                add(findings, seen, new Finding(Severity.SOFT, "lua-access", cls, "Lua can call this class, which "
+                        + String.join(", ", reached) + ": check that what Lua can call is limited"));
+            }
+        }
     }
 
     /** One finding per severity, rule and class; the details of merged findings are joined. */
@@ -224,6 +270,25 @@ public final class Scanner {
                             rule.what() + " (" + member.replace('/', '.') + ")"));
                 }
             }
+        }
+        List<String> lua = new ArrayList<>();
+        for (Object[] a : LUA_ANNOTATIONS) {
+            if (pool.descriptors.stream().anyMatch(d -> matches(d, (String) a[0]))) {
+                lua.add((String) a[1]);
+            }
+        }
+        for (Object[] r : LUA_REFERENCES) {
+            String pattern = (String) r[0];
+            boolean found = pattern.contains(".")
+                    ? pool.members.stream().anyMatch(m -> pattern.endsWith("*")
+                            ? m.startsWith(pattern.substring(0, pattern.length() - 1)) : m.equals(pattern))
+                    : pool.classes.stream().anyMatch(c -> matches(stripArray(c), pattern));
+            if (found) {
+                lua.add((String) r[1]);
+            }
+        }
+        for (String what : lua) {
+            add(findings, seen, new Finding(Severity.SOFT, "lua", where, what));
         }
         for (String s : pool.strings) {
             String lower = s.toLowerCase(Locale.ROOT);
@@ -287,6 +352,8 @@ public final class Scanner {
         final Set<String> classes = new LinkedHashSet<>();
         final Set<String> members = new LinkedHashSet<>();
         final Set<String> strings = new LinkedHashSet<>();
+        /** Type descriptors that stand alone ("Lpkg/Name;"): field types and annotation types. */
+        final Set<String> descriptors = new LinkedHashSet<>();
 
         static ConstantPool read(byte[] bytes) throws IOException {
             DataInputStream in = new DataInputStream(new ByteArrayInputStream(bytes));
@@ -333,6 +400,10 @@ public final class Scanner {
                 }
                 if (stringIndex[i] != 0) {
                     pool.strings.add(at(utf8, stringIndex[i]));
+                }
+                if (utf8[i] != null && utf8[i].length() > 2 && utf8[i].startsWith("L") && utf8[i].endsWith(";")
+                        && utf8[i].indexOf(';') == utf8[i].length() - 1) {
+                    pool.descriptors.add(utf8[i].substring(1, utf8[i].length() - 1));
                 }
             }
             for (int i = 1; i < count; i++) {
