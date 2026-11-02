@@ -1,0 +1,9 @@
+# Build record written by CI. Signed by the registry key.
+mod = "zb-hello-world"
+version = "2026.10.04"
+method = "published"
+release_sha256 = "06e0e187adc4af2e6b12131ced2e32874924fbe3f731c4f18d3afc7c837ef2b4"
+artifact_paths = ["42/media/java/client/ZBHelloWorld-2x.jar", "42/media/java/client/ZBHelloWorld.jar"]
+artifact_sha256 = ["817cde27c290801c6f121d1e0d1ba6fb8baa1c4a133d268e4927e55e3ccddba2", "73ea63e2d02099a1b5f4770c05d3e79cb63d9533e5095ca75f12dc21a136dbc8"]
+built_at = "2026-11-02T02:22:26Z"
+builders = ["github-ubuntu-24.04", "github-ubuntu-22.04"]
