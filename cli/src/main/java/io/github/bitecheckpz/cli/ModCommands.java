@@ -152,6 +152,8 @@ final class ModCommands {
                     ? "Do not approve: bcz reject " + t.mod + " --notes \"jars do not match the build record\""
                     : result != Main.OK
                     ? "Check the !! lines, then: bcz approve " + t.mod + "  or  bcz reject " + t.mod + " --notes \"why\""
+                    : "pending".equals(Toml.string(t.modInfo, "status")) ? "Next: bcz publish " + t.mod
+                            + " (publisher), then after CI: bcz approve " + t.mod
                     : soft ? "Next: bcz approve " + t.mod + " --notes \"why the findings are fine\""
                     : "Next: bcz approve " + t.mod);
         } else {
