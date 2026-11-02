@@ -1,0 +1,8 @@
+name=My Mod
+id=MyMod
+description=A minimal ZombieBuddy example mod, built reproducibly for BiteCheck.
+require=\ZombieBuddy
+
+javaJarFile=media/java/client/MyMod.jar
+javaPkgName=com.example.mymod
+ZBVersionMin=2.3.0

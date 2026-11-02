@@ -1,0 +1,155 @@
+# Submits one release of a Project Zomboid Java mod to the BiteCheck registry: `bcz submit` reads
+# bitecheck.toml from the mod repository, forks the registry, writes and signs the release file
+# and opens a pull request. Use it in the mod's own repository, e.g. on every tag v*:
+#
+#   - uses: actions/checkout@v7
+#   - uses: SmokerDoker/bitecheck-pz/submit-action@main
+#     with:
+#       author-key: ${{ secrets.BITECHECK_AUTHOR_KEY }}
+#       github-token: ${{ secrets.BITECHECK_GITHUB_TOKEN }}
+#
+# github-token: a personal access token of the author. The workflow's own GITHUB_TOKEN cannot fork
+# another repository or open a pull request there. Classic token: scope "public_repo" (fork the
+# registry, push the release branch to the fork, open the pull request) plus "workflow" (needed when
+# the fork is brought up to date and that update contains changes to .github/workflows).
+name: Submit to BiteCheck
+description: Submits a release of a Project Zomboid Java mod to the BiteCheck registry as a signed pull request.
+author: SmokerDoker
+branding:
+  icon: check-circle
+  color: green
+
+inputs:
+  author-key:
+    description: The author's private BiteCheck signing key (content of ~/.bitecheck/keys/<name>.key), from a secret
+    required: true
+  github-token:
+    description: Personal access token of the author that may fork the registry and open pull requests (see above)
+    required: true
+  registry:
+    description: The registry repository (owner/name)
+    required: false
+    default: SmokerDoker/bitecheck-pz
+  version:
+    description: 'Release version (default: the tag name without a leading "v")'
+    required: false
+    default: ""
+
+runs:
+  using: composite
+  steps:
+    - name: Check the inputs
+      id: check
+      shell: bash
+      env:
+        INPUT_VERSION: ${{ inputs.version }}
+        INPUT_REGISTRY: ${{ inputs.registry }}
+        AUTHOR_KEY: ${{ inputs.author-key }}
+        TOKEN: ${{ inputs.github-token }}
+      run: |
+        set -euo pipefail
+        version="$INPUT_VERSION"
+        if [ -z "$version" ]; then
+          if [ "$GITHUB_REF_TYPE" != tag ]; then
+            echo "::error::not running for a tag: set the input 'version'"
+            exit 1
+          fi
+          version="${GITHUB_REF_NAME#v}"
+        fi
+        if ! [[ "$version" =~ ^[0-9A-Za-z][0-9A-Za-z.+_-]*$ ]]; then
+          echo "::error::invalid version '$version' (letters, digits, '.', '+', '_', '-')"
+          exit 1
+        fi
+        if ! [[ "$INPUT_REGISTRY" =~ ^[A-Za-z0-9-]+/[A-Za-z0-9._-]+$ ]]; then
+          echo "::error::registry must look like owner/name"
+          exit 1
+        fi
+        if ! [[ "$GITHUB_SHA" =~ ^[0-9a-f]{40}$ ]]; then
+          echo "::error::unexpected commit '$GITHUB_SHA'"
+          exit 1
+        fi
+        if [ -z "$AUTHOR_KEY" ]; then
+          echo "::error::author-key is empty: add your private key as a repository secret (Settings > Secrets and variables > Actions)"
+          exit 1
+        fi
+        if [ -z "$TOKEN" ]; then
+          echo "::error::github-token is empty: add a personal access token as a repository secret"
+          exit 1
+        fi
+        if [ ! -f bitecheck.toml ]; then
+          echo "::error::no bitecheck.toml in $PWD; check out the mod repository first (actions/checkout)"
+          exit 1
+        fi
+        echo "version=$version" >> "$GITHUB_OUTPUT"
+
+    - uses: actions/setup-java@v5
+      with:
+        distribution: temurin
+        java-version: "21"
+
+    - name: Install the GitHub CLI if missing
+      shell: bash
+      run: |
+        set -euo pipefail
+        if command -v gh >/dev/null; then
+          gh --version | head -n 1
+          exit 0
+        fi
+        case "$RUNNER_OS" in
+          Linux)
+            sudo mkdir -p -m 755 /etc/apt/keyrings
+            curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg \
+              | sudo tee /etc/apt/keyrings/githubcli-archive-keyring.gpg > /dev/null
+            sudo chmod go+r /etc/apt/keyrings/githubcli-archive-keyring.gpg
+            echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/githubcli-archive-keyring.gpg] https://cli.github.com/packages stable main" \
+              | sudo tee /etc/apt/sources.list.d/github-cli.list > /dev/null
+            sudo apt-get update -q
+            sudo apt-get install -y -q gh
+            ;;
+          macOS) brew install gh ;;
+          *) echo "::error::the GitHub CLI (gh) is missing; install it before this action"; exit 1 ;;
+        esac
+
+    # The runner downloaded this action's whole repository at the ref the workflow asked for
+    # (e.g. @main or @v1), so bcz is built from exactly that ref, without a second checkout.
+    - name: Build bcz from the action's ref
+      id: bcz
+      shell: bash
+      run: |
+        set -euo pipefail
+        tools="$RUNNER_TEMP/bitecheck-tools"
+        rm -rf "$tools"
+        cp -R "$GITHUB_ACTION_PATH/.." "$tools"
+        (cd "$tools" && sh ./gradlew --no-daemon -q :cli:installDist)
+        bcz="$tools/cli/build/install/bcz/bin/bcz"
+        if [ "$RUNNER_OS" = Windows ]; then bcz="$bcz.bat"; fi
+        echo "bcz=$bcz" >> "$GITHUB_OUTPUT"
+
+    - name: Write the signing key
+      id: key
+      shell: bash
+      env:
+        AUTHOR_KEY: ${{ inputs.author-key }}
+      run: |
+        set -euo pipefail
+        umask 077
+        key="$RUNNER_TEMP/bitecheck-author.key"
+        printf '%s\n' "$AUTHOR_KEY" > "$key"
+        echo "key=$key" >> "$GITHUB_OUTPUT"
+
+    - name: Submit the release
+      shell: bash
+      env:
+        GH_TOKEN: ${{ inputs.github-token }}
+        BCZ: ${{ steps.bcz.outputs.bcz }}
+        KEY: ${{ steps.key.outputs.key }}
+        VERSION: ${{ steps.check.outputs.version }}
+        BITECHECK_REGISTRY: ${{ inputs.registry }}
+      run: |
+        set -euo pipefail
+        "$BCZ" submit --version "$VERSION" --commit "$GITHUB_SHA" --key "$KEY"
+
+    - name: Delete the signing key
+      if: always()
+      shell: bash
+      run: rm -f "$RUNNER_TEMP/bitecheck-author.key"

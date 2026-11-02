@@ -1,0 +1,16 @@
+# Build output
+build/
+.gradle/
+.kotlin/
+*.jar
+!gradle/wrapper/gradle-wrapper.jar
+
+# Never commit keys
+*.key
+
+# Editors and OS
+.idea/
+.vscode/
+*.iml
+.DS_Store
+Thumbs.db

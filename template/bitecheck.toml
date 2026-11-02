@@ -1,0 +1,14 @@
+# Registry metadata of this mod, read by `bcz submit`.
+# Format: the BiteCheck registry's strict TOML subset (tables, bare keys, "strings", integers,
+# booleans, one-line arrays).
+id = "my-mod"                  # registry id: lower case letters, digits, '-'
+name = "My Mod"
+license = "MIT"                # SPDX id, must match LICENSE
+workshop_id = ""               # optional Steam Workshop id
+
+[build]
+type = "rebuild"               # BiteCheck's CI rebuilds the jar from this repository, twice
+jdk = "temurin-25"             # Project Zomboid Build 42 runs on Java 25
+command = "./gradlew --no-daemon bitecheckMod"
+artifacts = ["build/bitecheck/42/media/java/client/MyMod.jar"]
+# game_branch = "pre-release"  # optional: Steam beta branch of the dedicated server to compile against (default: public)
