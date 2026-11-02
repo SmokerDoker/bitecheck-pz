@@ -154,12 +154,13 @@ public final class LauncherSelfTest {
         });
         run("steam: launch options keep the player's own options", () -> {
             Path script = Path.of("/games/BiteCheck/bitecheck.sh");
+            String quoted = "\"" + script + "\""; // the path as this OS writes it
             expect(SteamSetup.launchOptions(Platform.Os.LINUX, script, java.util.Optional.empty()),
-                    "\"/games/BiteCheck/bitecheck.sh\" --wrap %command% -javaagent:ZombieBuddy.jar --");
+                    quoted + " --wrap %command% -javaagent:ZombieBuddy.jar --");
             expect(SteamSetup.launchOptions(Platform.Os.WINDOWS, script, java.util.Optional.of("-agentlib:zbNative --")),
-                    "\"/games/BiteCheck/bitecheck.sh\" --wrap %command% -agentlib:zbNative --");
+                    quoted + " --wrap %command% -agentlib:zbNative --");
             expect(SteamSetup.launchOptions(Platform.Os.LINUX, script, java.util.Optional.of("gamemoderun %command% -x")),
-                    "gamemoderun \"/games/BiteCheck/bitecheck.sh\" --wrap %command% -x");
+                    "gamemoderun " + quoted + " --wrap %command% -x");
             String done = "\"/x/bitecheck.sh\" --wrap %command% -x";
             expect(SteamSetup.launchOptions(Platform.Os.LINUX, script, java.util.Optional.of(done)), done);
             expect(SteamSetup.isSetUp(java.util.Optional.of(done)), true);
