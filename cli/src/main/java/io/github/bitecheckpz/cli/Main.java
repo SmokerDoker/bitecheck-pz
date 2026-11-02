@@ -372,10 +372,15 @@ public final class Main {
             if (!jdk.matches("(temurin|zulu|corretto|microsoft|liberica|oracle)-[0-9]{2}")) {
                 throw new IllegalArgumentException("[build] jdk must look like temurin-25");
             }
+            String branch = Toml.string(build, "game_branch") == null ? "public" : Toml.string(build, "game_branch");
+            if (!branch.matches("[A-Za-z0-9][A-Za-z0-9._-]{0,63}")) {
+                throw new IllegalArgumentException("[build] game_branch may only contain letters, digits, '.', '_', '-'");
+            }
             values.addAll(List.of(
                     "jdk_distribution", jdk.substring(0, jdk.indexOf('-')),
                     "jdk_version", jdk.substring(jdk.indexOf('-') + 1),
-                    "command", String.valueOf(Toml.string(build, "command"))));
+                    "command", String.valueOf(Toml.string(build, "command")),
+                    "game_branch", branch));
         }
         for (int i = 0; i < values.size(); i += 2) {
             String value = values.get(i + 1);

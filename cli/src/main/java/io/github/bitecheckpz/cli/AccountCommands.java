@@ -115,7 +115,11 @@ final class AccountCommands {
 
         Path keyFile = a.option("key").map(Path::of).orElse(null);
         String github = Exec.gh(null, "api", "user", "--jq", ".login");
-        String upstream = a.option("registry-repo").orElse(REGISTRY_REPO);
+        String upstream = a.option("registry-repo").or(() -> java.util.Optional.ofNullable(System.getenv("BITECHECK_REGISTRY"))
+                .filter(s -> !s.isBlank())).orElse(REGISTRY_REPO);
+        if (!upstream.matches("[A-Za-z0-9-]+/[A-Za-z0-9._-]+")) {
+            throw new UsageException("the registry must be given as owner/repository");
+        }
         Path work = ModCommands.home().resolve("submit").resolve(id + "-" + version);
         deleteTree(work);
         Files.createDirectories(work.getParent());

@@ -287,6 +287,10 @@ public final class Lint {
         if (jdk != null && !jdk.matches("(temurin|zulu|corretto|microsoft|liberica|oracle)-[0-9]{2}")) {
             error(f, "[build] jdk must look like temurin-25 (distribution-majorversion)");
         }
+        String branch = Toml.string(build, "game_branch");
+        if (branch != null && !branch.matches("[A-Za-z0-9][A-Za-z0-9._-]{0,63}")) {
+            error(f, "[build] game_branch must be a Steam branch name (letters, digits, '.', '_', '-')");
+        }
         String command = Toml.string(build, "command");
         if (command != null && (command.contains("\n") || command.contains("\r"))) {
             error(f, "[build] command must be a single line");
