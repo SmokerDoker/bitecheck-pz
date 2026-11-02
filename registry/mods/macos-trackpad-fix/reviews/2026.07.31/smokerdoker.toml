@@ -1,0 +1,8 @@
+mod = "macos-trackpad-fix"
+version = "2026.07.31"
+build_sha256 = "3b7002baa1d3ed1629c0e6acfce71d82e8408b8427a5122990d02ee0e4967c0a"
+reviewer = "smokerdoker"
+verdict = "approve"
+scope = "full"
+reviewed_at = "2026-11-02T17:01:33Z"
+notes = "Full review of the of the source at 88cb288. Reflection: reads and writes the private float[] fields targetZoom and zoomLevel of zombie.core.textures.MultiTextureFBO2 hardcoded to then set the camera zoom target. Method handles: string concatenation only. No file, network or process access."
