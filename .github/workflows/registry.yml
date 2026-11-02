@@ -1,6 +1,8 @@
 # Runs on main after a pull request was merged, daily and on demand:
 #   1. builds every release that has no build record yet, twice, without secrets,
-#   2. signs a build record with the registry key if both builds match and the scan is clean,
+#      (and, for "workshop" releases, fetches the Steam Workshop jars in a job without secrets),
+#   2. signs a build record with the registry key if both builds match (workshop: the Workshop
+#      jars have exactly the files both builds produced) and the scan is clean,
 #   3. publishes the signed launcher index to the "index" branch.
 # The registry key is a secret (BITECHECK_REGISTRY_KEY) in the "registry-signing" environment.
 name: Registry
@@ -66,8 +68,45 @@ jobs:
       registry_ref: ${{ github.sha }}
       tools_ref: ${{ github.sha }}
 
+  workshop:
+    needs: pending
+    if: needs.pending.outputs.releases != '[]'
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include: ${{ fromJSON(needs.pending.outputs.releases) }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: "21"
+      - name: Build bcz
+        run: bash .github/scripts/build-bcz.sh
+      - name: Fetch the Workshop jars
+        id: fetch
+        env:
+          RELEASE: ${{ matrix.release }}
+        run: |
+          bcz=cli/build/install/bcz/bin/bcz
+          if $bcz release-info "$RELEASE" --registry . | grep -qx 'type=workshop'; then
+            bash .github/scripts/fetch-workshop.sh "$bcz" "$RELEASE" . workshop
+            echo "found=true" >> "$GITHUB_OUTPUT"
+          fi
+      # Uploading fails if an artifact with this name already exists (e.g. one a build job made).
+      - uses: actions/upload-artifact@v7
+        if: steps.fetch.outputs.found == 'true'
+        with:
+          name: workshop-${{ matrix.key }}
+          path: workshop/
+          retention-days: 1
+
   sign:
-    needs: [pending, build-a, build-b]
+    needs: [pending, build-a, build-b, workshop]
     # also for the other releases when one release's build failed (its own leg fails on the missing artifact)
     if: ${{ !cancelled() && needs.pending.outputs.releases != '[]' }}
     runs-on: ubuntu-latest
@@ -97,19 +136,26 @@ jobs:
         with:
           name: build-b-${{ matrix.key }}
           path: b
-      - name: Check both builds and scan
+      - name: Read the release
+        id: info
+        env:
+          RELEASE: ${{ matrix.release }}
+        run: cli/build/install/bcz/bin/bcz release-info "$RELEASE" --registry . | grep '^type=' >> "$GITHUB_OUTPUT"
+      # Only the trusted workshop job's artifact: if its upload failed (the name was taken), stop.
+      - name: Require the Workshop jars from the workshop job
+        if: steps.info.outputs.type == 'workshop' && needs.workshop.result != 'success'
         run: |
-          if [ -f a/game.txt ] || [ -f b/game.txt ]; then
-            cmp -s a/game.txt b/game.txt || { echo "::error::the game updated between the two builds, re-run"; diff a/game.txt b/game.txt || true; exit 1; }
-            { echo "Game build:"; echo '```'; cat a/game.txt; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
-          fi
-          diff -q a/sha256.txt b/sha256.txt || { echo "::error::builds differ"; exit 1; }
-          i=0
-          while read -r sha path; do
-            test "$(sha256sum "a/$i.jar" | cut -d' ' -f1)" = "$sha"
-            cli/build/install/bcz/bin/bcz scan "a/$i.jar" --format markdown >> "$GITHUB_STEP_SUMMARY"
-            i=$((i + 1))
-          done < a/sha256.txt
+          echo "::error::the workshop job did not succeed, so its Workshop jars cannot be trusted"
+          exit 1
+      - uses: actions/download-artifact@v8
+        if: steps.info.outputs.type == 'workshop'
+        with:
+          name: workshop-${{ matrix.key }}
+          path: workshop
+      - name: Check both builds and scan
+        env:
+          RELEASE: ${{ matrix.release }}
+        run: bash .github/scripts/check-builds.sh cli/build/install/bcz/bin/bcz "$RELEASE" .
       - name: Write and sign the build record
         env:
           RELEASE: ${{ matrix.release }}
@@ -123,8 +169,8 @@ jobs:
           printf '%s\n' "$REGISTRY_KEY" > "$RUNNER_TEMP/registry.key"
           bcz=cli/build/install/bcz/bin/bcz
           jars=()
-          n=$(wc -l < a/sha256.txt)
-          for ((i = 0; i < n; i++)); do jars+=("a/$i.jar"); done
+          n=$(find final -name '*.jar' | wc -l)
+          for ((i = 0; i < n; i++)); do jars+=("final/$i.jar"); done
           $bcz build-record "$RELEASE" "${jars[@]}" --builder github-ubuntu-24.04 --builder github-ubuntu-22.04
           build="${RELEASE%.toml}.build.toml"
           $bcz sign "$build" --key "$RUNNER_TEMP/registry.key"

@@ -1,6 +1,8 @@
 # Runs on pull requests that add or change a release: builds the mod twice on independent
-# runners, compares the hashes and scans the jar. Results go to the run summary; the jar is
-# uploaded so reviewers can review exactly what was built.
+# runners, compares the hashes and scans the jar. For a "workshop" release it also downloads the
+# Steam Workshop item and checks that its jars have exactly the files both runners built. Results
+# go to the run summary; the jars (artifact mod-<key>) are uploaded so reviewers can review
+# exactly what will be verified.
 name: Mod submission
 
 on:
@@ -76,12 +78,23 @@ jobs:
         with:
           ref: ${{ github.event.pull_request.base.sha }}
           persist-credentials: false
+      - name: Check out the pull request's registry files
+        uses: actions/checkout@v7
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          path: pr
+          persist-credentials: false
       - uses: actions/setup-java@v5
         with:
           distribution: temurin
           java-version: "21"
       - name: Build bcz
         run: bash .github/scripts/build-bcz.sh
+      - name: Read the release
+        id: info
+        env:
+          RELEASE: ${{ matrix.release }}
+        run: cli/build/install/bcz/bin/bcz release-info "pr/$RELEASE" --registry pr | grep '^type=' >> "$GITHUB_OUTPUT"
       - uses: actions/download-artifact@v8
         with:
           name: build-a-${{ matrix.key }}
@@ -90,33 +103,22 @@ jobs:
         with:
           name: build-b-${{ matrix.key }}
           path: b
-      - name: Compare the two builds
+      - name: Fetch the Workshop jars
+        if: steps.info.outputs.type == 'workshop'
+        env:
+          RELEASE: ${{ matrix.release }}
+        run: bash .github/scripts/fetch-workshop.sh cli/build/install/bcz/bin/bcz "pr/$RELEASE" pr workshop
+      - name: Compare the builds and scan the jars
+        env:
+          RELEASE: ${{ matrix.release }}
+          KEY: ${{ matrix.key }}
         run: |
-          echo "### Reproducible build: \`${{ matrix.key }}\`" >> "$GITHUB_STEP_SUMMARY"
-          # rebuilds: both builders must have compiled against the same game build (out/game.txt)
-          if [ -f a/game.txt ] || [ -f b/game.txt ]; then
-            if ! cmp -s a/game.txt b/game.txt; then
-              { echo "❌ The game updated between the two builds, re-run the workflow."; echo '```'; diff a/game.txt b/game.txt || true; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
-              echo "::error::the game updated between the two builds, re-run"
-              exit 1
-            fi
-            { echo "Both runners compiled against the same game build:"; echo '```'; cat a/game.txt; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
-          fi
-          if ! diff -q a/sha256.txt b/sha256.txt >/dev/null; then
-            { echo "❌ The two builds differ. See CONTRIBUTING.md for reproducible builds."; echo '```'; diff a/sha256.txt b/sha256.txt; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
-            exit 1
-          fi
-          { echo "✅ Both runners produced identical jars:"; echo '```'; cat a/sha256.txt; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
-      - name: Scan the jars
-        run: |
-          status=0
-          for jar in a/*.jar; do
-            cli/build/install/bcz/bin/bcz scan "$jar" --format markdown >> "$GITHUB_STEP_SUMMARY" || status=$?
-          done
-          exit $status
+          echo "### Release \`$KEY\`" >> "$GITHUB_STEP_SUMMARY"
+          bash .github/scripts/check-builds.sh cli/build/install/bcz/bin/bcz "pr/$RELEASE" pr
       - uses: actions/upload-artifact@v7
         if: always()
         with:
           name: mod-${{ matrix.key }}
-          path: a/
+          path: final/
+          if-no-files-found: ignore
           retention-days: 90

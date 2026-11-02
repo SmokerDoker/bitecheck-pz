@@ -5,7 +5,7 @@ These notes record a first, file-by-file look at mods that were added to the reg
 `VERIFIED`. A human reviewer reads the source again, compares it with these notes and, if they
 agree, signs a review with `bcz review` (see CONTRIBUTING.md).
 
-Every entry here is a `published` release: the jars the author committed to the repository at
+Every entry here except staircast (a `workshop` release) is a `published` release: the jars the author committed to the repository at
 the given commit. These upstream mods are not built with the BiteCheck Gradle plugin, so CI does
 not rebuild them; instead `bcz source-check` confirms that every class in the jar is declared in
 the public source, and the bytecode is compared with the source by hand (`javap -v -p`).
@@ -22,6 +22,7 @@ the public source, and the bytecode is compared with the source by hand (`javap 
 | [z-better-workshop-upload](z-better-workshop-upload.md) | `c7bd197` | 2 | 0 | Filtered Workshop upload; staging copy in the OS temp folder; `-2x` jar from an older commit |
 | [real-reset](real-reset.md) | `b024f8f` | 1 | 0 | Server admin chunk reset; paths stay in the save folder, admin only |
 | [desync-scope](desync-scope.md) | `68d3bd5` | 1 | 0 | Multiplayer desync diagnostics, only measures; reports in `~/Zomboid/DesyncScope` |
+| [staircast](staircast.md) | `0f30357` | 1 | 0 | See the floor above on stairs; `workshop` release: Workshop jar rebuilt from source by CI |
 
 `bcz inspect` also checks the layout: a version folder (`42/`, `42.x/`) next to `common/`, `mod.info`
 in one of them, and every jar named in `javaJarFile`. drying-rack-lua-bridge was left out because

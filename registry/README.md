@@ -35,6 +35,30 @@ This status is derived from the files — there is no field anyone can simply se
 
 Registry files use a strict subset of TOML: tables, bare keys, `"strings"`, integers, booleans and one-line arrays. Dates are written as strings.
 
+**Release** (`releases/<version>.toml`, signed by the publisher or author). `[build] type` says where the jar players load comes from:
+
+| type | jar players load | what CI checks |
+| --- | --- | --- |
+| `rebuild` (default) | built by CI | the build `command` gives the same jar on two runners |
+| `published` | committed in the source repository at `commit` | takes those jars; reviewers compare them with the source (`bcz inspect`) |
+| `workshop` | from the Steam Workshop item `workshop_id` | builds twice from source and checks that the Workshop jars have exactly the same files (`bcz jar-compare`; only `META-INF/MANIFEST.MF` may differ) |
+
+```toml
+mod = "staircast"
+version = "1.1.0"
+commit = "0f3035702951cc337526a0d83c69df8dea64b2bb"
+
+[build]
+type = "workshop"
+workshop_id = "3684713089"
+jdk = "temurin-25"
+command = "mvn -B -q package"   # gets $PZ_GAME_DIR (game jar) and $ZOMBIEBUDDY_JAR (ZombieBuddy API jar)
+artifacts = ["Contents/mods/Staircast/42.13/media/java/client/staircast.jar"]   # built by command
+workshop_artifacts = ["mods/Staircast/42.13/media/java/client/staircast.jar"]    # same jar in the Workshop item
+```
+
+For a `workshop` release the build record lists the Workshop jars (`method = "workshop"`, `artifact_paths`, `artifact_sha256`), so players are verified with the jar they already have. A Workshop update changes the jar and needs a new release.
+
 **Build record** (`<version>.build.toml`, written by `bcz build-record`):
 
 ```toml
