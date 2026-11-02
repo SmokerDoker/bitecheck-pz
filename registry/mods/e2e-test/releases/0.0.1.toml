@@ -1,0 +1,9 @@
+mod = "e2e-test"
+version = "0.0.1"
+commit = "12ee59d985ee21a2a2cd01fafada8ceb83443234"
+
+[build]
+type = "rebuild"
+jdk = "temurin-25"
+command = "cd template && ./gradlew --no-daemon bitecheckMod"
+artifacts = ["template/build/bitecheck/42/media/java/client/MyMod.jar"]
