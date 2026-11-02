@@ -368,14 +368,24 @@ public final class SelfTest {
                     List.of("an artifact path is not a safe relative path to a .jar"));
         });
         run("jar-compare: same files match, whatever the manifest, timestamps and order", () -> {
-            Path built = zipOf(Map.of("a/A.class", "A", "a/B.class", "B", "META-INF/MANIFEST.MF", "Built-By: ci"), 0L);
-            Path same = zipOf(Map.of("a/B.class", "B", "META-INF/MANIFEST.MF", "Built-By: someone", "a/A.class", "A"),
-                    1_700_000_000_000L);
-            Path extra = zipOf(Map.of("a/A.class", "A", "a/B.class", "B", "a/Evil.class", "E"), 0L);
-            Path changed = zipOf(Map.of("a/A.class", "A2", "a/B.class", "B"), 0L);
+            String m = "META-INF/MANIFEST.MF";
+            Path built = zipOf(Map.of("a/A.class", "A", "a/B.class", "B",
+                    m, "Manifest-Version: 1.0\nCreated-By: Maven JAR Plugin 3.4.1\nBuild-Jdk-Spec: 25\n"), 0L);
+            Path same = zipOf(Map.of("a/B.class", "B", "a/A.class", "A",
+                    m, "Manifest-Version: 1.0\nCreated-By: Gradle\nBuilt-By: someone\n"), 1_700_000_000_000L);
+            Path extra = zipOf(Map.of("a/A.class", "A", "a/B.class", "B", m, "Manifest-Version: 1.0\n",
+                    "a/Evil.class", "E"), 0L);
+            Path changed = zipOf(Map.of("a/A.class", "A2", "a/B.class", "B", m, "Manifest-Version: 1.0\n"), 0L);
+            Path classPath = zipOf(Map.of("a/A.class", "A", "a/B.class", "B",
+                    m, "Manifest-Version: 1.0\nClass-Path: ../../evil.jar\n"), 0L);
+            Path otherCase = zipOf(Map.of("a/A.class", "A", "a/B.class", "B", m, "Manifest-Version: 1.0\n",
+                    "meta-inf/manifest.mf", "Manifest-Version: 1.0\nLauncher-Agent-Class: a.Evil\n"), 0L);
             expect(JarCompare.differences(built, same), List.of());
             expect(JarCompare.differences(built, extra), List.of("a/Evil.class: not built from the source"));
             expect(JarCompare.differences(built, changed), List.of("a/A.class: differs"));
+            expect(JarCompare.differences(built, classPath),
+                    List.of(m + ": attributes differ (beyond build tool and JDK)"));
+            expect(JarCompare.differences(built, otherCase), List.of("meta-inf/manifest.mf: not built from the source"));
         });
         run("workshop release: lint, build record of the Workshop jar, VERIFIED", () -> {
             Fixture f = Fixture.create();
