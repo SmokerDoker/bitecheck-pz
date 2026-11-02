@@ -339,6 +339,32 @@ public final class SelfTest {
             expect(new Verifier(f.registry(), f.registryKey).verify(p.jars.get(0)).status(),
                     Verifier.Status.UNVERIFIED);
         });
+        run("mod layout: version folder, mod.info in it or in common/, jars named in javaJarFile", () -> {
+            Path repo = Files.createTempDirectory("bcz-layout");
+            String zed = "42/media/java/shared/Z-2x.jar";          // mod.info in common/, as ZombieBuddy's author does it
+            String old = "41/media/java/shared/Z-2x.jar";          // a Build 41 jar next to it: ignored
+            String nested = "Contents/mods/R/42.13/media/java/R.jar";
+            String onlyCommon = "C/common/media/java/C.jar";       // no version folder at all
+            String noModInfo = "E/42/media/java/E.jar";
+            String unnamed = "42/media/java/shared/Old.jar";
+            for (String jar : List.of(zed, old, nested, onlyCommon, noModInfo, unnamed)) {
+                Files.createDirectories(repo.resolve(jar).getParent());
+                Files.writeString(repo.resolve(jar), "jar");
+            }
+            Files.createDirectories(repo.resolve("common"));
+            Files.writeString(repo.resolve("common/mod.info"), "name=Z\njavaJarFile=media/java/shared/Z-2x.jar\n");
+            Files.writeString(repo.resolve("Contents/mods/R/42.13/mod.info"), "javaJarFile1 = /media/java/R.jar\n");
+            Files.writeString(repo.resolve("C/mod.info"), "javaJarFile=media/java/C.jar\n");
+            Files.writeString(repo.resolve("C/common/mod.info"), "javaJarFile=media/java/C.jar\n");
+            expect(ModLayout.problems(repo, List.of(old, zed, nested)), List.of());
+            List<String> bad = ModLayout.problems(repo, List.of(onlyCommon, noModInfo, unnamed, "media/java/X.jar"));
+            expect(bad.size(), 4);
+            expect(bad.get(0).contains("no version folder C/42/"), true);
+            expect(bad.get(1).contains("no mod.info in E/common/ or E/42/"), true);
+            expect(bad.get(2).contains("not named in mod.info"), true);
+            expect(bad.get(3).contains("not in <version folder>/media/java/"), true);
+            expect(ModLayout.problems(repo, List.of(old)), List.of("no jar for Build 42 (only older version folders)"));
+        });
         run("source-check: classes match their sources; extra class is reported", () -> {
             Path src = Files.createTempDirectory("bcz-src");
             Files.writeString(src.resolve("A.java"), "package x.y;\n// class Fake {}\npublic class A {\n"

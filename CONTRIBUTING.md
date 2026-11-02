@@ -50,7 +50,7 @@ Set up once: `gh auth login`, then `bcz login` (creates your key); a maintainer 
 
 ```sh
 bcz status                      # what is waiting for you
-bcz inspect <mod>               # source at the release commit in ~/.bitecheck/review/, scan, source check
+bcz inspect <mod>               # source at the release commit in ~/.bitecheck/review/, layout, scan, source check
 bcz approve <mod>               # or: bcz reject <mod> --notes "why"
 bcz flag <mod> --severity critical --notes "what you found"
 ```
