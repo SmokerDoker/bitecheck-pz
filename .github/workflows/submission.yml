@@ -77,7 +77,7 @@ jobs:
           distribution: temurin
           java-version: "21"
       - name: Build bcz
-        run: ./gradlew --no-daemon -q :cli:installDist
+        run: bash .github/scripts/build-bcz.sh
       - uses: actions/download-artifact@v8
         with:
           name: build-a-${{ matrix.key }}

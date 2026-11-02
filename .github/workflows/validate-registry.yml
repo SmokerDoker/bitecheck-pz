@@ -47,7 +47,7 @@ jobs:
           distribution: temurin
           java-version: "21"
       - name: Build bcz from the base branch
-        run: cd base && ./gradlew --no-daemon -q :cli:installDist
+        run: bash base/.github/scripts/build-bcz.sh base
       - name: Lint names, fields and signatures
         run: |
           bcz=base/cli/build/install/bcz/bin/bcz

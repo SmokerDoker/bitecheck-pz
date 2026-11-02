@@ -5,15 +5,18 @@
 #   type "published": takes the jar(s) the author committed in the repository at that commit
 #
 # Rebuilds compile against the game's own classes, which must not be redistributed. They come from
-# the free Project Zomboid Dedicated Server (Steam app 380870, anonymous SteamCMD login), installed
-# outside the mod source; the build command finds it through PZ_GAME_DIR (the BiteCheck Gradle
-# plugin reads it). Optional release field [build] game_branch selects a Steam beta branch.
-# The game files are not cached and not uploaded, and a jar that contains classes of the game fails
-# the build (this catches accidental bundling; the untrusted build command itself runs next to the
-# game files and is not sandboxed). The Steam build id goes into the step summary, the job
-# output and out/game.txt; the jobs comparing builder a and b fail if they used different builds.
+# the free Project Zomboid Dedicated Server (Steam app 380870, anonymous login): DepotDownloader
+# (pinned by SHA-256, checks every chunk against Valve's manifest) fetches only
+# java/projectzomboid.jar, outside the mod source; the build command finds it through PZ_GAME_DIR
+# (the BiteCheck Gradle plugin reads it). Optional release field [build] game_branch selects a
+# Steam beta branch. The game files are not cached and not uploaded, and a jar that contains
+# classes of the game fails the build (this catches accidental bundling; the untrusted build
+# command itself runs next to the game files and is not sandboxed). The depot manifest ids and the
+# jar's SHA-256 go into the step summary and out/game.txt; the jobs comparing builder a and b fail
+# if they used different game files.
 # Not cached on purpose: the untrusted build command runs in these jobs (also on main) and could
-# poison a shared cache that later builds of other mods would restore.
+# poison a shared cache that later builds of other mods would restore. bcz is built with javac
+# (.github/scripts/build-bcz.sh) before any untrusted code runs, for the same reason.
 name: Build mod (reusable)
 
 on:
@@ -46,12 +49,14 @@ on:
 permissions:
   contents: read
 
+env:
+  DEPOTDOWNLOADER_VERSION: "3.4.0"
+  DEPOTDOWNLOADER_SHA256: a999dec66b4850fc961bd50366696d23c2d0fad7b18790e6a5647b2f19097a53
+
 jobs:
   build:
     runs-on: ${{ inputs.runner }}
-    timeout-minutes: 45
-    outputs:
-      game_build: ${{ steps.game.outputs.buildid }}
+    timeout-minutes: 30
     steps:
       - name: Check out the trusted bcz tool
         uses: actions/checkout@v7
@@ -70,7 +75,7 @@ jobs:
           distribution: temurin
           java-version: "21"
       - name: Build bcz
-        run: cd tools && ./gradlew --no-daemon -q :cli:installDist
+        run: bash tools/.github/scripts/build-bcz.sh tools
       - name: Read the release
         id: info
         env:
@@ -96,60 +101,58 @@ jobs:
             exit 1
           fi
           echo "branch=$branch" >> "$GITHUB_OUTPUT"
-      - name: Install the Project Zomboid Dedicated Server
+      - name: Download the game jar
         id: game
         if: steps.info.outputs.type == 'rebuild'
         env:
           BRANCH: ${{ steps.branch.outputs.branch }}
           RUNNER_LABEL: ${{ inputs.runner }}
+          DOTNET_SYSTEM_GLOBALIZATION_INVARIANT: "1"
         run: |
           set -euo pipefail
-          sudo apt-get update -q
-          sudo apt-get install -y -q lib32gcc-s1 lib32stdc++6
-          steamcmd_dir="$RUNNER_TEMP/steamcmd"
+          tool="$RUNNER_TEMP/depotdownloader"
           dir="$RUNNER_TEMP/pz-server"
-          mkdir -p "$steamcmd_dir" "$dir"
-          curl -fsSL https://steamcdn-a.akamaihd.net/client/installer/steamcmd_linux.tar.gz | tar -xz -C "$steamcmd_dir"
-          beta=()
-          if [ "$BRANCH" != public ]; then beta=(-beta "$BRANCH"); fi
-          df -h "$RUNNER_TEMP"
-          # SteamCMD updates itself on the first start and now and then fails a download: retry
+          mkdir -p "$tool" "$dir"
+          curl -fsSL -o "$tool/dd.zip" \
+            "https://github.com/SteamRE/DepotDownloader/releases/download/DepotDownloader_$DEPOTDOWNLOADER_VERSION/DepotDownloader-linux-x64.zip"
+          echo "$DEPOTDOWNLOADER_SHA256  $tool/dd.zip" | sha256sum -c --quiet
+          unzip -q "$tool/dd.zip" -d "$tool"
+          chmod +x "$tool/DepotDownloader"
+          # only the jar the mod compiles against, not the whole server
+          echo 'regex:^java[/\]projectzomboid\.jar$' > "$tool/files.txt"
           installed=false
           for attempt in 1 2 3; do
-            log="$RUNNER_TEMP/steamcmd-$attempt.log"
-            "$steamcmd_dir/steamcmd.sh" +force_install_dir "$dir" +login anonymous \
-              +app_update 380870 "${beta[@]}" validate +quit > "$log" 2>&1 || true
-            grep -E "Success|Error|ERROR|FAILED|Invalid" "$log" || true
-            if grep -q "Success! App '380870' fully installed" "$log" && [ -f "$dir/java/projectzomboid.jar" ]; then
+            log="$RUNNER_TEMP/depotdownloader-$attempt.log"
+            if "$tool/DepotDownloader" -app 380870 -os linux -osarch 64 -branch "$BRANCH" \
+                 -filelist "$tool/files.txt" -dir "$dir" > "$log" 2>&1 \
+               && [ -f "$dir/java/projectzomboid.jar" ]; then
               installed=true
               break
             fi
-            echo "::warning::SteamCMD attempt $attempt did not finish, retrying"
+            tail -n 20 "$log"
+            echo "::warning::download attempt $attempt failed, retrying"
             sleep 15
           done
+          cat "$log"
           if [ "$installed" != true ]; then
-            tail -n 30 "$log"
-            echo "::error::could not install the dedicated server (Steam app 380870, branch $BRANCH)"
+            echo "::error::could not download projectzomboid.jar (Steam app 380870, branch $BRANCH)"
             exit 1
           fi
-          buildid="$(sed -n 's/^[[:space:]]*"buildid"[[:space:]]*"\([0-9]*\)".*/\1/p' "$dir/steamapps/appmanifest_380870.acf" | sed -n 1p)"
-          if ! [[ "$buildid" =~ ^[0-9]+$ ]]; then
-            echo "::error::no Steam build id in appmanifest_380870.acf"
+          manifests="$(grep -oE 'Manifest [0-9]+' "$log" | awk '{print $2}' | sort -u | paste -sd, -)"
+          if [ -z "$manifests" ]; then
+            echo "::error::no depot manifest id in the DepotDownloader output"
             exit 1
           fi
           jar_sha="$(sha256sum "$dir/java/projectzomboid.jar" | cut -d' ' -f1)"
-          {
-            echo "dir=$dir"
-            echo "buildid=$buildid"
-          } >> "$GITHUB_OUTPUT"
+          echo "dir=$dir" >> "$GITHUB_OUTPUT"
           {
             echo "app=380870"
             echo "branch=$BRANCH"
-            echo "buildid=$buildid"
+            echo "manifests=$manifests"
             echo "projectzomboid_jar_sha256=$jar_sha"
           } > "$RUNNER_TEMP/game.txt"
           {
-            echo "Game ($RUNNER_LABEL): Project Zomboid Dedicated Server (Steam app 380870), branch \`$BRANCH\`, build id \`$buildid\`"
+            echo "Game ($RUNNER_LABEL): Project Zomboid Dedicated Server (Steam app 380870), branch \`$BRANCH\`, depot manifest \`$manifests\`, projectzomboid.jar \`$jar_sha\`"
             echo
           } >> "$GITHUB_STEP_SUMMARY"
       - name: Fetch the source at the exact commit
