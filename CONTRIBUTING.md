@@ -22,6 +22,10 @@ Requirements for a release:
 - Network access and file access outside `~/Zomboid` must be explained in the mod description and will be checked carefully in review.
 - Game classes from The Indie Stone are referenced at compile time only (`compileOnly`) and never bundled. CI fails a build whose jar contains game classes.
 
+### Mods that are only on the Steam Workshop
+
+A mod whose jar players get from the Workshop can be listed without changing how it is built: a release with `type = "workshop"` (see [registry/README.md](registry/README.md)) names the Workshop item and the build command. CI builds the jar from the public source twice and checks that the Workshop jar has exactly the same files; players are then verified with the Workshop jar they already have. The build must give the same class files as the author's (same JDK, the `--release` the author used), and every Workshop update needs a new release.
+
 ### Without the template
 
 Any build works if it is reproducible: CI runs your `command` twice on different machines with `PZ_GAME_DIR` pointing to the dedicated server, and both jars must be byte-identical. With Gradle that means `isPreserveFileTimestamps = false` and `isReproducibleFileOrder = true` on archive tasks, a pinned wrapper, the JDK named in `bitecheck.toml`, pinned dependencies, and no dates or machine names in the jar. Check locally by building twice and comparing `bcz hash` of both jars.

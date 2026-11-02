@@ -2,6 +2,8 @@
 # Used twice per release (two independent runners) by submission.yml and registry.yml. Has no
 # secrets and read-only access.
 #   type "rebuild":   builds the jar with the release's build command (reproducible build)
+#   type "workshop":  builds the jar(s) the same way; the jobs that compare builder a and b then
+#                     check that the Steam Workshop item's jars have exactly these files
 #   type "published": takes the jar(s) the author committed in the repository at that commit
 #
 # Rebuilds compile against the game's own classes, which must not be redistributed. They come from
@@ -17,6 +19,8 @@
 # Not cached on purpose: the untrusted build command runs in these jobs (also on main) and could
 # poison a shared cache that later builds of other mods would restore. bcz is built with javac
 # (.github/scripts/build-bcz.sh) before any untrusted code runs, for the same reason.
+# Build commands also get ZOMBIEBUDDY_JAR, the ZombieBuddy API jar (pinned by SHA-256), for builds
+# that do not fetch it themselves (e.g. Maven: mvn install:install-file -Dfile=$ZOMBIEBUDDY_JAR).
 name: Build mod (reusable)
 
 on:
@@ -50,8 +54,8 @@ permissions:
   contents: read
 
 env:
-  DEPOTDOWNLOADER_VERSION: "3.4.0"
-  DEPOTDOWNLOADER_SHA256: a999dec66b4850fc961bd50366696d23c2d0fad7b18790e6a5647b2f19097a53
+  ZOMBIEBUDDY_VERSION: "2.3.4"
+  ZOMBIEBUDDY_SHA256: eb79b9876332010733a8e0d7ce4fe0377846059a9e28859029e2a0fb449f6cf2
 
 jobs:
   build:
@@ -82,14 +86,14 @@ jobs:
           RELEASE: ${{ inputs.release }}
         run: tools/cli/build/install/bcz/bin/bcz release-info "registry/$RELEASE" --registry registry >> "$GITHUB_OUTPUT"
       - name: Set up the mod's JDK
-        if: steps.info.outputs.type == 'rebuild'
+        if: steps.info.outputs.type != 'published'
         uses: actions/setup-java@v5
         with:
           distribution: ${{ steps.info.outputs.jdk_distribution }}
           java-version: ${{ steps.info.outputs.jdk_version }}
       - name: Check the game branch
         id: branch
-        if: steps.info.outputs.type == 'rebuild'
+        if: steps.info.outputs.type != 'published'
         env:
           GAME_BRANCH: ${{ steps.info.outputs.game_branch }}
         run: |
@@ -108,27 +112,23 @@ jobs:
           echo "branch=$branch" >> "$GITHUB_OUTPUT"
       - name: Download the game jar
         id: game
-        if: steps.info.outputs.type == 'rebuild'
+        if: steps.info.outputs.type != 'published'
         env:
           BRANCH: ${{ steps.branch.outputs.branch }}
           RUNNER_LABEL: ${{ inputs.runner }}
           DOTNET_SYSTEM_GLOBALIZATION_INVARIANT: "1"
         run: |
           set -euo pipefail
-          tool="$RUNNER_TEMP/depotdownloader"
+          dd="$(bash tools/.github/scripts/depotdownloader.sh)"
+          tool="$(dirname "$dd")"
           dir="$RUNNER_TEMP/pz-server"
-          mkdir -p "$tool" "$dir"
-          curl -fsSL -o "$tool/dd.zip" \
-            "https://github.com/SteamRE/DepotDownloader/releases/download/DepotDownloader_$DEPOTDOWNLOADER_VERSION/DepotDownloader-linux-x64.zip"
-          echo "$DEPOTDOWNLOADER_SHA256  $tool/dd.zip" | sha256sum -c --quiet
-          unzip -q "$tool/dd.zip" -d "$tool"
-          chmod +x "$tool/DepotDownloader"
+          mkdir -p "$dir"
           # only the jar the mod compiles against, not the whole server
           printf '%s\n' 'java/projectzomboid.jar' 'regex:projectzomboid\.jar$' > "$tool/files.txt"
           installed=false
           for attempt in 1 2 3; do
             log="$RUNNER_TEMP/depotdownloader-$attempt.log"
-            if "$tool/DepotDownloader" -app 380870 -os linux -osarch 64 -branch "$BRANCH" \
+            if "$dd" -app 380870 -os linux -osarch 64 -branch "$BRANCH" \
                  -filelist "$tool/files.txt" -dir "$dir" > "$log" 2>&1 \
                && [ -f "$dir/java/projectzomboid.jar" ]; then
               installed=true
@@ -169,6 +169,16 @@ jobs:
             echo "Game ($RUNNER_LABEL): Project Zomboid Dedicated Server (Steam app 380870), branch \`$BRANCH\`, depot manifest \`$manifests\`, projectzomboid.jar \`$jar_sha\`"
             echo
           } >> "$GITHUB_STEP_SUMMARY"
+      - name: Download the ZombieBuddy API jar
+        id: zombiebuddy
+        if: steps.info.outputs.type != 'published'
+        run: |
+          set -euo pipefail
+          jar="$RUNNER_TEMP/zombiebuddy/ZombieBuddy-$ZOMBIEBUDDY_VERSION.jar"
+          mkdir -p "$(dirname "$jar")"
+          curl -fsSL -o "$jar" "https://github.com/zed-0xff/ZombieBuddy/releases/download/v$ZOMBIEBUDDY_VERSION/ZombieBuddy.jar"
+          echo "$ZOMBIEBUDDY_SHA256  $jar" | sha256sum -c --quiet
+          echo "jar=$jar" >> "$GITHUB_OUTPUT"
       - name: Fetch the source at the exact commit
         env:
           SOURCE: ${{ steps.info.outputs.source }}
@@ -180,11 +190,12 @@ jobs:
           git -C src checkout -q FETCH_HEAD
           test "$(git -C src rev-parse HEAD)" = "$COMMIT"
       - name: Build the mod
-        if: steps.info.outputs.type == 'rebuild'
+        if: steps.info.outputs.type != 'published'
         working-directory: src
         env:
           BUILD_COMMAND: ${{ steps.info.outputs.command }}
           PZ_GAME_DIR: ${{ steps.game.outputs.dir }}
+          ZOMBIEBUDDY_JAR: ${{ steps.zombiebuddy.outputs.jar }}
         run: bash -c "$BUILD_COMMAND"
       - name: Hash the jars
         env:

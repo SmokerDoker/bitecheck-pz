@@ -1,0 +1,11 @@
+mod = "staircast"
+version = "1.1.0"
+commit = "0f3035702951cc337526a0d83c69df8dea64b2bb"
+
+[build]
+type = "workshop"
+workshop_id = "3684713089"
+jdk = "temurin-25"
+command = "mvn -B -q install:install-file -DgroupId=projectzomboid -DartifactId=projectzomboid -Dpackaging=jar -Dfile=$PZ_GAME_DIR/java/projectzomboid.jar -Dversion=42.13.2 && mvn -B -q install:install-file -DgroupId=me.zed_0xff -DartifactId=zombie_buddy -Dpackaging=jar -Dfile=$ZOMBIEBUDDY_JAR -Dversion=2.3.4 && mvn -B -q package"
+artifacts = ["Contents/mods/Staircast/42.13/media/java/client/staircast.jar"]
+workshop_artifacts = ["mods/Staircast/42.13/media/java/client/staircast.jar"]
