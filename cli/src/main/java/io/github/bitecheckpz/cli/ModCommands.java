@@ -190,7 +190,7 @@ final class ModCommands {
             boolean pending = "pending".equals(Toml.string(t.modInfo, "status"));
             out.println(!layout.isEmpty()
                     ? (pending ? "Do not publish it: the mod does not load"
-                            : "Do not approve: bcz reject " + t.mod + " --notes \"does not load: " + layout.get(0) + "\"")
+                            : "Do not approve: bcz reject " + t.mod + " --notes \"does not load in Build 42 (layout)\"")
                     : !built.isEmpty() && matching != artifacts.size()
                     ? "Do not approve: bcz reject " + t.mod + " --notes \"jars do not match the build record\""
                     : result != Main.OK
