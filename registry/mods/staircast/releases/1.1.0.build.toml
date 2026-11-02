@@ -1,0 +1,9 @@
+# Build record written by CI. Signed by the registry key.
+mod = "staircast"
+version = "1.1.0"
+method = "workshop"
+release_sha256 = "026bd38dd57dd8adc953b0bfba06282c89cffc3fa0f1196ecf4dfa20a7fb51bc"
+artifact_paths = ["mods/Staircast/42.13/media/java/client/staircast.jar"]
+artifact_sha256 = ["f58c41c7f21020ba22760d52b51656bca231d794d64e721a7119665bcdb8bc5b"]
+built_at = "2026-11-02T19:21:13Z"
+builders = ["github-ubuntu-24.04", "github-ubuntu-22.04"]
