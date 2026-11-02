@@ -188,8 +188,12 @@ final class ModCommands {
             Files.writeString(t.modFile, active, StandardCharsets.UTF_8);
         }
         commitAndPush(t.registry, t.mod, "Publish " + t.mod + " " + t.version);
-        out.println("Published " + t.mod + " " + t.version + ". CI now writes the build record (about a minute),");
-        out.println("then: bcz approve " + t.mod);
+        if (Files.isRegularFile(t.registry.buildFile(t.mod, t.version))) {
+            out.println("Published " + t.mod + " " + t.version + ". Next: bcz approve " + t.mod);
+        } else {
+            out.println("Published " + t.mod + " " + t.version + ". CI now writes the build record (about a minute),");
+            out.println("then: bcz approve " + t.mod);
+        }
         return Main.OK;
     }
 
