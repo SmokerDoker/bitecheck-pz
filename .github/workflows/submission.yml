@@ -34,6 +34,7 @@ jobs:
     needs: detect
     if: needs.detect.outputs.releases != '[]'
     strategy:
+      fail-fast: false
       matrix:
         include: ${{ fromJSON(needs.detect.outputs.releases) }}
     uses: ./.github/workflows/build-mod.yml
@@ -49,6 +50,7 @@ jobs:
     needs: detect
     if: needs.detect.outputs.releases != '[]'
     strategy:
+      fail-fast: false
       matrix:
         include: ${{ fromJSON(needs.detect.outputs.releases) }}
     uses: ./.github/workflows/build-mod.yml
@@ -62,6 +64,8 @@ jobs:
 
   compare:
     needs: [detect, build-a, build-b]
+    # also for the other releases when one release's build failed (its own compare fails on the missing artifact)
+    if: ${{ !cancelled() && needs.detect.outputs.releases != '[]' }}
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
