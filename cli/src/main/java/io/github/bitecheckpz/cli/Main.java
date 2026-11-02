@@ -46,9 +46,27 @@ public final class Main {
                   Sign the release as its publisher and mark a pending entry active.
               bcz approve <mod> [version] [--notes <text>] [--scope full|diff]
               bcz reject <mod> [version] --notes <text>
-                  Write and sign your review of the release's build record.
-                  These commands sign with ~/.bitecheck/keys/<name>.key; <name> is the only key there,
-                  or pass --as <name>.
+                  Write and sign your review of the release's build record. --scope diff: you reviewed
+                  only the changes since the previous release, which must be verified.
+              bcz flag <mod> [version] --notes <text> [--severity info|suspicion|critical]
+                  Report a problem with a release. A critical flag warns every player.
+                  These commands sign with ~/.bitecheck/keys/<name>.key (see 'bcz login', or --as <name>).
+                  Without write access to the registry they open a pull request from your fork.
+
+            Mod authors (needs the GitHub CLI 'gh', logged in):
+              bcz login [--as <name>]
+                  Link your GitHub account and create your signing key if you have none.
+              bcz submit [--version <v>] [--commit <sha>] [--key <file>] [--registry-repo <owner/repo>]
+                  Submit the tagged release of the mod in the current directory (reads bitecheck.toml):
+                  writes and signs the release file and opens a pull request to the registry.
+
+            Maintainers:
+              bcz trust <reviewer> [new|reviewer|trusted]
+                  Show or set a reviewer's level.
+              bcz reviewers
+                  Every reviewer with level, GitHub account and number of reviews.
+              bcz submitter-check --login <github-user> --base <git-ref>
+                  CI: check that a pull request only changes files of its author's account.
 
             Usage:
               bcz keygen <name> [--dir <dir>]
@@ -126,6 +144,12 @@ public final class Main {
                 case "publish" -> ModCommands.publish(parsed, out);
                 case "approve" -> ModCommands.review(parsed, out, "approve");
                 case "reject" -> ModCommands.review(parsed, out, "reject");
+                case "flag" -> ModCommands.flag(parsed, out);
+                case "login" -> AccountCommands.login(parsed, out);
+                case "submit" -> AccountCommands.submit(parsed, out);
+                case "submitter-check" -> AccountCommands.submitterCheck(parsed, out);
+                case "trust" -> AccountCommands.trust(parsed, out);
+                case "reviewers" -> AccountCommands.reviewers(parsed, out);
                 default -> throw new UsageException("unknown command '" + parsed.command + "'");
             };
         } catch (UsageException e) {
