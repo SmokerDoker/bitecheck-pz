@@ -21,7 +21,7 @@ keys/
 
 1. A build record with the jar's SHA-256 exists and is signed by the registry key.
 2. The release file it was built from is unchanged and signed by the mod's author.
-3. At least two different reviewers (not the author) approved exactly this jar hash with valid signatures, at least one of them with level `trusted`.
+3. Enough different reviewers approved exactly this jar hash (or the build record listing it) with valid signatures, as set in `policy.toml`: `required_approvals` (default 2), of which `required_trusted` have level `trusted` (default 1). The author never counts; the publisher of an upstream mod counts only while `publisher_may_review = true` (start-up policy: one trusted approval, publisher may review).
 4. There is no open critical flag for this hash.
 
 Other results: `UNVERIFIED` (not in the registry or not enough approvals — the launcher asks the user), `FLAGGED` (open critical flag — strong warning), `BLOCKED` (on the block list or a confirmed flag — never loaded), `INVALID` (files do not match their signatures — treated as tampering).

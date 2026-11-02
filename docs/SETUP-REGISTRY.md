@@ -44,7 +44,9 @@ Reviewers are added with a public key in `keys/reviewers/<name>.pub` and an entr
 level = "trusted"   # new | reviewer | trusted
 ```
 
-How many approvals a release needs is set in `registry/policy.toml`. The start-up policy is one approval from a `trusted` reviewer; later two (a newcomer plus a reviewer with a higher level).
+How many approvals a release needs is set in `registry/policy.toml`. The start-up policy is one approval from a `trusted` reviewer, and `publisher_may_review = true` lets the publisher of an upstream mod be that reviewer (an author can never approve their own mod). Later: two approvals (a newcomer plus a reviewer with a higher level) and `publisher_may_review = false`.
+
+A publisher signs release files with a key in `keys/authors/<name>.pub`; a reviewer signs reviews with a key in `keys/reviewers/<name>.pub`. One person can use the same key pair for both: copy the `.pub` file into both folders.
 
 ## Rotating a compromised key
 

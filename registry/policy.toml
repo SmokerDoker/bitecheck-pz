@@ -1,10 +1,13 @@
 # What a release needs before launchers treat it as verified.
 #
-# Start-up policy (2026-11): one approval from a trusted reviewer.
+# Start-up policy (2026-11): one approval from a trusted reviewer, and the publisher may be that
+# reviewer for mods written by someone else (a publisher brings an upstream mod into the registry
+# and reviews it). An author can never approve their own mod, whatever this file says.
 #
-# Planned once there are enough reviewers: two approvals from different reviewers - one may be
-# a newcomer (level "new"), the other must have a higher level ("reviewer" or "trusted").
-# That needs a small policy extension (e.g. required_experienced = 1); until then, raising
-# required_approvals to 2 keeps required_trusted = 1.
+# Planned once there are enough reviewers: publisher_may_review = false and two approvals from
+# different reviewers - one may be a newcomer (level "new"), the other must have a higher level
+# ("reviewer" or "trusted"). That needs a small policy extension (e.g. required_experienced = 1);
+# until then, raising required_approvals to 2 keeps required_trusted = 1.
 required_approvals = 1
 required_trusted = 1
+publisher_may_review = true

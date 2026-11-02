@@ -200,6 +200,38 @@ public final class SelfTest {
             expect(new Verifier(f.registry(), f.registryKey).verify(p.jars.get(0)).status(),
                     Verifier.Status.UNVERIFIED);
         });
+        run("policy: publisher_may_review lets a publisher review an upstream mod, never their own", () -> {
+            Fixture f = Fixture.create();
+            Published p = Published.add(f, false);
+            Files.delete(p.dir.resolve("reviews/2.0.0/bob.toml"));
+            Files.delete(p.dir.resolve("reviews/2.0.0/carol.toml"));
+            // alice publishes upstream-fps and is also a trusted reviewer
+            Files.copy(f.dir.resolve("keys/authors/alice.pub"), f.dir.resolve("keys/reviewers/alice.pub"));
+            Files.writeString(f.dir.resolve("keys/trust.toml"), "[reviewers.alice]\nlevel = \"trusted\"\n",
+                    java.nio.file.StandardOpenOption.APPEND);
+            Path review = Records.writeReview(p.release, null, "alice", "approve", "full", "upstream checked");
+            Signatures.sign(review, f.author);
+            Path policy = f.dir.resolve("registry/policy.toml");
+            Files.writeString(policy, "required_approvals = 1\nrequired_trusted = 1\n");
+            Verifier verifier = new Verifier(f.registry(), f.registryKey);
+            expect(verifier.verify(p.jars.get(0)).status(), Verifier.Status.UNVERIFIED);
+            expect(Lint.check(f.registry(), java.util.Optional.of(f.registryKey)).stream()
+                    .anyMatch(e -> e.contains("alice.toml: the publisher cannot review")), true);
+            Files.writeString(policy, "required_approvals = 1\nrequired_trusted = 1\npublisher_may_review = true\n");
+            expect(verifier.verify(p.jars.get(0)).status(), Verifier.Status.VERIFIED);
+            expect(Lint.check(f.registry(), java.util.Optional.of(f.registryKey)), List.of());
+            // better-guns is alice's own mod: her review never counts
+            Files.delete(f.reviewFile("bob"));
+            Files.delete(f.reviewFile("carol"));
+            f.addReview("alice", f.author, "approve");
+            expect(f.verify().status(), Verifier.Status.UNVERIFIED);
+            expect(Lint.check(f.registry(), java.util.Optional.of(f.registryKey)).stream()
+                    .anyMatch(e -> e.contains("better-guns/reviews/1.0.0/alice.toml: the publisher cannot review")),
+                    true);
+            Files.writeString(policy, "publisher_may_review = \"yes\"\n");
+            expect(Lint.check(f.registry(), java.util.Optional.of(f.registryKey)).stream()
+                    .anyMatch(e -> e.contains("publisher_may_review must be true or false")), true);
+        });
         run("policy: bootstrap policy with one trusted approval", () -> {
             Fixture f = Fixture.create();
             Files.delete(f.reviewFile("carol"));

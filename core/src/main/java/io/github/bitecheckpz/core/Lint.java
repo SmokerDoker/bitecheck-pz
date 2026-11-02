@@ -26,6 +26,7 @@ public final class Lint {
     private final Registry registry;
     private final Optional<Keys.PublicKeyInfo> registryKey;
     private final List<String> errors = new ArrayList<>();
+    private Registry.Policy reviewPolicy = Registry.Policy.DEFAULT;
 
     private Lint(Registry registry, Optional<Keys.PublicKeyInfo> registryKey) {
         this.registry = registry;
@@ -68,6 +69,14 @@ public final class Lint {
                     if (doc.containsKey(key) && !(doc.get(key) instanceof Long n && n >= 1 && n <= 10)) {
                         error(policy, key + " must be a number from 1 to 10");
                     }
+                }
+                if (doc.containsKey("publisher_may_review") && !(doc.get("publisher_may_review") instanceof Boolean)) {
+                    error(policy, "publisher_may_review must be true or false");
+                }
+                try {
+                    reviewPolicy = registry.policy();
+                } catch (Toml.TomlException e) {
+                    error(policy, e.getMessage());
                 }
             }
         }
@@ -186,7 +195,7 @@ public final class Lint {
             for (Path versionDir : list(reviews)) {
                 for (Path f : list(versionDir)) {
                     if (f.getFileName().toString().endsWith(".toml")) {
-                        checkReview(f, mod, versionDir.getFileName().toString(), author);
+                        checkReview(f, mod, versionDir.getFileName().toString(), modInfo);
                     }
                 }
             }
@@ -282,7 +291,7 @@ public final class Lint {
         }
     }
 
-    private void checkReview(Path f, String mod, String version, String author) {
+    private void checkReview(Path f, String mod, String version, Map<String, Object> modInfo) {
         Map<String, Object> doc = parse(f);
         if (doc == null) {
             return;
@@ -292,8 +301,9 @@ public final class Lint {
         if (!reviewer.equals(Toml.string(doc, "reviewer"))) {
             error(f, "reviewer must match the file name");
         }
-        if (reviewer.equals(author)) {
-            error(f, "the publisher cannot review their own entry");
+        String selfReview = Registry.selfReviewProblem(modInfo, reviewer, reviewPolicy);
+        if (selfReview != null) {
+            error(f, selfReview);
         }
         if (!mod.equals(Toml.string(doc, "mod")) || !version.equals(Toml.string(doc, "version"))) {
             error(f, "mod/version do not match the folder");
