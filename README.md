@@ -12,7 +12,7 @@ BiteCheck adds a verification step before a Java mod is loaded:
 
 - **Public source only.** The curated registry only lists mods whose full source code is public.
 - **Reproducible builds.** The `.jar` you download is built by CI from that exact source, twice, on independent runners. Both builds must be byte-for-byte identical.
-- **Signatures.** Every release is signed by its author, by the registry, and by at least two independent reviewers.
+- **Signatures.** Every release is signed by its author or publisher, by the registry, and by its reviewers (during start-up one trusted reviewer, later at least two independent ones).
 - **Automatic scanning + human review.** Suspicious APIs (process start, native code, dynamic class loading, network, file access outside `~/Zomboid`) are flagged before a human reviews the code.
 - **Per-version approval.** Approval is tied to the SHA-256 hash of one exact `.jar`. A new version is unverified until it is reviewed.
 
@@ -66,7 +66,7 @@ Your mod is never blocked while it waits for review: players can load it as an u
 - [x] Steam launch options integration (`--wrap %command%`) and dedicated server mode ([docs/SERVER.md](docs/SERVER.md))
 - [x] Registry website generated from the registry files (`bcz site`, GitHub Pages)
 - [x] Installers for Windows, macOS and Linux built by GitHub Actions (`release.yml`)
-- [x] Start-up policy: one trusted review (later two, see `registry/policy.toml`)
+- [x] Start-up policy: one trusted review, publishers may review upstream mods (later two reviews, see `registry/policy.toml`)
 - [x] First three mods prepared as pending entries with preliminary reviews ([docs/reviews](docs/reviews/README.md))
 - [ ] First test with real players
 - [ ] Registry key set up ([docs/SETUP-REGISTRY.md](docs/SETUP-REGISTRY.md)) and first real mods

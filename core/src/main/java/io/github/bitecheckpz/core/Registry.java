@@ -99,14 +99,18 @@ public final class Registry {
         return level == null ? "new" : level;
     }
 
-    /** How many reviews a release needs. */
-    public record Policy(int requiredApprovals, int requiredTrusted) {
-        public static final Policy DEFAULT = new Policy(2, 1);
+    /**
+     * How many reviews a release needs, and whether a publisher may review an entry whose author
+     * is someone else (start-up only; an author never reviews their own mod).
+     */
+    public record Policy(int requiredApprovals, int requiredTrusted, boolean publisherMayReview) {
+        public static final Policy DEFAULT = new Policy(2, 1, false);
     }
 
     /**
-     * Review policy from registry/policy.toml ({@code required_approvals}, {@code required_trusted}).
-     * Defaults to 2 approvals incl. 1 trusted; values below 1 are raised to 1.
+     * Review policy from registry/policy.toml ({@code required_approvals}, {@code required_trusted},
+     * {@code publisher_may_review}). Defaults to 2 approvals incl. 1 trusted and no publisher
+     * reviews; values below 1 are raised to 1.
      */
     public Policy policy() throws IOException, Toml.TomlException {
         Path file = root.resolve("registry").resolve("policy.toml");
@@ -118,7 +122,7 @@ public final class Registry {
         long trusted = doc.get("required_trusted") instanceof Long l ? l : Policy.DEFAULT.requiredTrusted();
         int a = (int) Math.max(1, Math.min(approvals, 10));
         int t = (int) Math.max(1, Math.min(trusted, a));
-        return new Policy(a, t);
+        return new Policy(a, t, Toml.bool(doc, "publisher_may_review"));
     }
 
     /** All jar hashes a build record vouches for: jar_sha256 and/or artifact_sha256 = [...]. */
@@ -142,6 +146,23 @@ public final class Registry {
     public static String signer(Map<String, Object> modInfo) {
         String publisher = Toml.string(modInfo, "publisher");
         return publisher != null ? publisher : Toml.string(modInfo, "author");
+    }
+
+    /**
+     * Why {@code reviewer} may not review this entry, or null if they may. The author never may;
+     * the publisher only if the policy allows it and the author is someone else.
+     */
+    public static String selfReviewProblem(Map<String, Object> modInfo, String reviewer, Policy policy) {
+        String author = Toml.string(modInfo, "author");
+        String publisher = Toml.string(modInfo, "publisher");
+        if (reviewer.equals(author)) {
+            return publisher == null ? "the publisher cannot review their own entry"
+                    : "the author cannot review their own mod";
+        }
+        if (reviewer.equals(publisher) && !policy.publisherMayReview()) {
+            return "the publisher cannot review their own entry";
+        }
+        return null;
     }
 
     /** Reason a jar hash is on the block list, if it is. */

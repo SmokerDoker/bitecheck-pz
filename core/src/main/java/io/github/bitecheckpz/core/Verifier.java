@@ -19,9 +19,9 @@ import java.util.stream.Stream;
  *   <li>a build record listing its SHA-256 exists and is signed by the registry key,</li>
  *   <li>the release file named in that record is unchanged and signed by the mod's publisher
  *       (or its author, if the entry has no separate publisher),</li>
- *   <li>enough distinct reviewers (not the publisher) approved exactly this jar or this build
- *       record with valid signatures, as required by the registry policy (default: 2 approvals,
- *       at least 1 from a "trusted" reviewer),</li>
+ *   <li>enough distinct reviewers (not the author, and not the publisher unless the policy allows
+ *       it) approved exactly this jar or this build record with valid signatures, as required by
+ *       the registry policy (default: 2 approvals, at least 1 from a "trusted" reviewer),</li>
  *   <li>there is no open critical flag for this hash, and the entry is not pending.</li>
  * </ol>
  *
@@ -199,6 +199,7 @@ public final class Verifier {
             }
 
             // 4. Reviews.
+            Registry.Policy policy = registry.policy();
             int approvals = 0;
             int trusted = 0;
             Set<String> seen = new HashSet<>();
@@ -212,7 +213,7 @@ public final class Verifier {
                     String fileName = reviewFile.getFileName().toString();
                     String reviewer = fileName.substring(0, fileName.length() - ".toml".length());
                     String problem = checkReview(reviewFile, reviewer, sha, Hashing.sha256Hex(buildFile), mod,
-                            version, author);
+                            version, modInfo, policy);
                     if (problem != null) {
                         messages.add("review by '" + reviewer + "' not counted: " + problem);
                         continue;
@@ -228,7 +229,6 @@ public final class Verifier {
                     messages.add("approved by '" + reviewer + "' (" + level + ")");
                 }
             }
-            Registry.Policy policy = registry.policy();
             if (approvals >= policy.requiredApprovals() && trusted >= policy.requiredTrusted()) {
                 return new Result(Status.VERIFIED, sha, mod, version, messages, method);
             }
@@ -243,12 +243,13 @@ public final class Verifier {
 
     /** Returns null if the review counts as an approval, otherwise the reason it does not. */
     private String checkReview(Path file, String reviewer, String sha, String buildSha, String mod, String version,
-            String author) throws IOException, Toml.TomlException {
+            Map<String, Object> modInfo, Registry.Policy policy) throws IOException, Toml.TomlException {
         if (!Registry.NAME.matcher(reviewer).matches()) {
             return "invalid reviewer name";
         }
-        if (reviewer.equals(author)) {
-            return "the publisher cannot review their own entry";
+        String selfReview = Registry.selfReviewProblem(modInfo, reviewer, policy);
+        if (selfReview != null) {
+            return selfReview;
         }
         Map<String, Object> review = registry.read(file);
         if (!reviewer.equals(Toml.string(review, "reviewer"))) {
