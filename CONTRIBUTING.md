@@ -4,7 +4,7 @@ Thanks for helping! There are three ways to contribute.
 
 ## 1. Submit a mod (modders)
 
-1. Start from the [mod template](template/README.md) (once it is published: **Use this template** on `SmokerDoker/bitecheck-mod-template`). It uses the BiteCheck Gradle plugin, which compiles against the game's jar without bundling it and makes the jar reproducible. Make the repository public under a license that allows review and rebuilding (e.g. MIT, Apache 2.0, GPL).
+1. Copy the [`template/`](template/README.md) folder of this repository into a new repository of your own. It uses the BiteCheck Gradle plugin, which compiles against the game's jar without bundling it and makes the jar reproducible. Make the repository public under a license that allows review and rebuilding (e.g. MIT, Apache 2.0, GPL).
 2. Install the [GitHub CLI](https://cli.github.com), run `gh auth login`, then `bcz login`. This creates your signing key in `~/.bitecheck/keys/` — back it up.
 3. Fill in `bitecheck.toml`, tag a release (`git tag v1.0.0 && git push --tags`) and run `bcz submit` in your mod's folder. It writes and signs the release file, registers your key and GitHub account with your first submission, and opens a pull request here.
 4. CI builds your mod twice against the Project Zomboid dedicated server, compares the hashes and scans the jar. A reviewer approves it (how many approvals are needed is set in `registry/policy.toml`), then it is merged.

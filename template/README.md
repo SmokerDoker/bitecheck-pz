@@ -7,8 +7,8 @@ BiteCheck's CI rebuilds the jar from your source twice and checks that both buil
 
 ## 1. Start from the template
 
-Click **Use this template** on GitHub (or copy this folder) and make the repository public.
-Then rename the example everywhere:
+Copy this folder (`template/` in the [BiteCheck repository](https://github.com/SmokerDoker/bitecheck-pz))
+into a new, public repository of your own. Then rename the example everywhere:
 
 | What | Where |
 | --- | --- |
