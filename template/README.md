@@ -101,6 +101,14 @@ approves it. You can also run `bcz submit` by hand.
 
 Until your release is reviewed, players can still load it as an unverified mod with a warning.
 
+Before you upload the mod to the Workshop, check that your jar is the one BiteCheck verifies:
+
+```sh
+bcz fetch       # "local jar matches the verified build", or it offers CI's jar
+```
+
+It only replaces your jar if it differs and you confirm. CI's jars are kept for 30 days.
+
 CI compiles against the current public version of the game. Build your release with an up-to-date
 game too: compiling against another game version can change the jar (constants of the game are
 copied into it), and then the jar you upload to the Workshop no longer matches the one BiteCheck

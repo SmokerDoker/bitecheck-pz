@@ -56,6 +56,18 @@ public final class CliSelfTest {
                 expect(w.status("jar v1"), Verifier.Status.VERIFIED);
                 expect(git(w.remote, "log", "--oneline", "main").contains("Review m 1.0: approve"), true);
             });
+            run("fetch: compares the local jar with the build record, replaces nothing unasked", () -> {
+                Path project = tmp.resolve("project");
+                write(project, "bitecheck.toml", "id = \"m\"\nname = \"M\"\nlicense = \"MIT\"\n");
+                write(project, JAR, "jar v1");
+                expect(bcz(w, "fetch", "--dir", project.toString(), "--version", "1.0"), Main.OK);
+                expect(lastOutput.strip(), "m 1.0: local jar matches the verified build");
+                write(project, JAR, "built against another game version");
+                expect(bcz(w, "fetch", "--dir", project.toString(), "--version", "1.0"), Main.ERROR);
+                expect(lastOutput.contains(JAR + ": local "), true);
+                expect(lastOutput.contains("Nothing changed."), true);
+                expect(Files.readString(project.resolve(JAR)), "built against another game version");
+            });
             run("approve: diff review of the next release counts", () -> {
                 expect(bcz(w, "approve", "m", "1.1", "--scope", "diff"), Main.OK);
                 expect(Toml.string(Toml.parse(w.repo.resolve("registry/mods/m/reviews/1.1/pub.toml")),

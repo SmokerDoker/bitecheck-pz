@@ -64,6 +64,17 @@ final class Exec {
         return check(dir, prepend("gh", args));
     }
 
+    /** Runs gh and writes its standard output (e.g. a downloaded zip) to a file. */
+    static boolean ghToFile(Path file, String... args) throws IOException, InterruptedException {
+        try {
+            return new ProcessBuilder(prepend("gh", args)).redirectOutput(file.toFile())
+                    .redirectError(ProcessBuilder.Redirect.DISCARD).start().waitFor() == 0;
+        } catch (IOException e) {
+            throw new IOException("gh is needed for this command and was not found"
+                    + " (GitHub CLI: https://cli.github.com, then 'gh auth login')", e);
+        }
+    }
+
     private static String[] prepend(String first, String... rest) {
         List<String> all = new ArrayList<>(List.of(first));
         all.addAll(List.of(rest));

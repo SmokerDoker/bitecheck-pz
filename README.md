@@ -90,6 +90,7 @@ bcz approve my-mod                          # sign your review (bcz publish my-m
 bcz flag my-mod --severity critical --notes "…"   # report a problem with a release
 bcz login                                   # mod authors: link GitHub (gh CLI), create your key
 bcz submit                                  # mod authors: submit the tagged release in this folder
+bcz fetch                                   # mod authors: is your jar the verified one? (replaces it only if you confirm)
 bcz trust bob reviewer                      # maintainers: reviewer levels; bcz reviewers lists them
 
 bcz keygen alice                            # Ed25519 key pair; private key in ~/.bitecheck/keys/
