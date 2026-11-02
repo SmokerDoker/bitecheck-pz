@@ -111,6 +111,15 @@ public final class SelfTest {
             expect(r.findings().stream().anyMatch(f -> f.rule().equals("network")), true);
             expect(r.findings().stream().anyMatch(f -> f.rule().equals("strings")), true);
         });
+        run("scanner: Java that Lua can call, and what Lua reaches through it", () -> {
+            Scanner.Report risky = Scanner.scan(jarOf("LuaFileMod"));
+            expect(risky.findings().stream().anyMatch(f -> f.rule().equals("lua")
+                    && f.detail().contains("@LuaMethod")), true);
+            expect(risky.findings().stream().anyMatch(f -> f.rule().equals("lua-access")
+                    && f.detail().contains("accesses files")), true);
+            Scanner.Report plain = Scanner.scan(jarOf("LuaPlainMod"));
+            expect(plain.findings().stream().map(Scanner.Finding::rule).toList(), List.of("lua", "reflection"));
+        });
         run("scanner: native library inside the jar is hard", () -> {
             Path jar = Files.createTempFile("bcz-native", ".jar");
             try (var zip = new java.util.zip.ZipOutputStream(Files.newOutputStream(jar))) {
