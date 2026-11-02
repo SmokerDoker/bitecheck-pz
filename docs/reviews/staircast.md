@@ -13,7 +13,7 @@
 
 | Path | SHA-256 | Classes | Scan | Source check |
 |---|---|---|---|---|
-| `mods/Staircast/42.13/media/java/client/staircast.jar` | `f58c41c7f21020ba22760d52b51656bca231d794d64e721a7119665bcdb8bc5b` | 25 | see CI run | classes rebuilt from source by CI |
+| `mods/Staircast/42.13/media/java/client/staircast.jar` | `f58c41c7f21020ba22760d52b51656bca231d794d64e721a7119665bcdb8bc5b` | 25 | 0 hard, 2 soft | all files rebuilt byte-identical from source by CI (two runners) |
 
 The 25 classes match the source: 12 top-level classes plus 13 nested `Patch_*` classes.
 
@@ -123,3 +123,10 @@ Nothing suspicious. Small, readable render patches; build compiles only `src/b42
 - that the CI build uses known `projectzomboid` and `zombie_buddy` jars and a fixed Maven version
   (open version ranges, unpinned default plugins);
 - the `setLastPos` bug (report upstream).
+
+## CI check (pull request #3)
+
+Both runners built `Contents/mods/Staircast/42.13/media/java/client/staircast.jar` (identical,
+`c7efc9cd…`); `bcz jar-compare` found the Workshop jar (Workshop manifest 2210927596768167393) to
+contain exactly the same files. The two soft scan findings: method handles in `Mod` and the
+`Field` access in `Patch_IsoWorld` (`IsoWorld.drawWorld`, read only), both described above.
