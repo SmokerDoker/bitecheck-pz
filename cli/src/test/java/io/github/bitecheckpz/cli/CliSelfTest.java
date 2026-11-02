@@ -82,13 +82,37 @@ public final class CliSelfTest {
                 Files.writeString(w.repo.resolve("registry/mods/m/flags/extra.toml"), "x");
                 Files.writeString(w.repo.resolve("registry/mods/m/releases/1.1.toml"), "changed\n",
                         java.nio.file.StandardOpenOption.APPEND);
-                Files.writeString(w.repo.resolve("keys/trust.toml"), "\n", java.nio.file.StandardOpenOption.APPEND);
-                git(w.repo, "add", "-A");
-                git(w.repo, "commit", "-q", "-m", "pr");
+                commit(w, "pr");
                 expect(bcz(w, "submitter-check", "--login", "PubGH", "--base", base), Main.OK);
-                expect(lastOutput.contains("maintainer: keys/trust.toml"), true);
                 expect(bcz(w, "submitter-check", "--login", "mallory", "--base", base), Main.ERROR);
                 expect(lastOutput.contains("belongs to 'pub' (GitHub PubGH), not to mallory"), true);
+                // Not the author's business: reviewer levels, removing a flag, moving someone's review.
+                Files.writeString(w.repo.resolve("keys/trust.toml"), "\n", java.nio.file.StandardOpenOption.APPEND);
+                Files.delete(w.repo.resolve("registry/mods/m/flags/1.0-1.toml"));
+                Files.move(w.repo.resolve("registry/mods/m/reviews/1.0/pub.toml"),
+                        w.repo.resolve("registry/mods/m/reviews/1.0/new.toml"));
+                commit(w, "more");
+                expect(bcz(w, "submitter-check", "--login", "PubGH", "--base", base), Main.ERROR);
+                expect(lastOutput.contains("maintainer: keys/trust.toml"), true);
+                expect(lastOutput.contains("maintainer: registry/mods/m/flags/1.0-1.toml: changes or removes a flag"),
+                        true);
+                expect(lastOutput.contains("reviews/1.0/new.toml: 'new' has no GitHub account"), true);
+                expect(bcz(w, "submitter-check", "--login", "mallory", "--base", base), Main.ERROR);
+                expect(lastOutput.contains("reviews/1.0/pub.toml: belongs to 'pub'"), true);
+                git(w.repo, "reset", "-q", "--hard", base);
+                // "rev" has a key but no account yet: nobody may claim it in a pull request.
+                Files.writeString(w.repo.resolve("keys/accounts.toml"), "[accounts.rev]\ngithub = \"mallory\"\n",
+                        java.nio.file.StandardOpenOption.APPEND);
+                commit(w, "claim");
+                expect(bcz(w, "submitter-check", "--login", "mallory", "--base", base), Main.ERROR);
+                expect(lastOutput.contains("links or changes the account of existing name 'rev'"), true);
+                // A new author may link their own new key.
+                git(w.repo, "reset", "-q", "--hard", base);
+                Files.copy(w.repo.resolve("keys/reviewers/rev.pub"), w.repo.resolve("keys/authors/newbie.pub"));
+                Files.writeString(w.repo.resolve("keys/accounts.toml"), "[accounts.newbie]\ngithub = \"Newbie\"\n",
+                        java.nio.file.StandardOpenOption.APPEND);
+                commit(w, "new author");
+                expect(bcz(w, "submitter-check", "--login", "newbie", "--base", base), Main.OK);
                 git(w.repo, "reset", "-q", "--hard", base);
             });
         } finally {
@@ -204,6 +228,11 @@ public final class CliSelfTest {
             return new Verifier(new Registry(repo), registryPub)
                     .verifyHash(Hashing.sha256Hex(jarContent.getBytes(StandardCharsets.UTF_8))).status();
         }
+    }
+
+    private static void commit(World w, String message) throws Exception {
+        git(w.repo, "add", "-A");
+        git(w.repo, "commit", "-q", "-m", message);
     }
 
     private static void identity(Path repo) throws Exception {

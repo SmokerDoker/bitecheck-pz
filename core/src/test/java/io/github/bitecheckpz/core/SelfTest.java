@@ -261,6 +261,21 @@ public final class SelfTest {
             }
             expect(refused, true);
         });
+        run("diff: the same jar in two releases does not send diff reviews in a circle", () -> {
+            Fixture f = Fixture.create();
+            Files.writeString(f.dir.resolve("registry/policy.toml"), "required_approvals = 1\nrequired_trusted = 1\n");
+            Path jar = f.dir.resolve("same.jar");
+            Files.writeString(jar, "unchanged jar");
+            for (String v : List.of("1.1", "1.2")) {
+                Path release = f.modDir.resolve("releases/" + v + ".toml");
+                Files.writeString(release, Files.readString(f.releaseFile).replace("1.0.0", v));
+                Signatures.sign(release, f.author);
+                Signatures.sign(Records.writeBuildRecord(release, jar, List.of("a", "b")), f.registry);
+                Signatures.sign(Records.writeReview(release, jar, "bob", "approve", "diff", "same jar"), f.bob);
+            }
+            // Must finish; 1.1 is verified through 1.0, so the jar is verified.
+            expect(new Verifier(f.registry(), f.registryKey).verify(jar).status(), Verifier.Status.VERIFIED);
+        });
         run("revoked: nothing signed by a revoked key counts", () -> {
             Fixture f = Fixture.create();
             String bob = Keys.readPublic(f.dir.resolve("keys/reviewers/bob.pub")).id();

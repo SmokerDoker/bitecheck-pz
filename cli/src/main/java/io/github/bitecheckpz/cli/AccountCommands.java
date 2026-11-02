@@ -264,8 +264,8 @@ final class AccountCommands {
 
     /**
      * Checks that a pull request only changes files that belong to its author's GitHub account:
-     * their own mods and releases, their own reviews, and their own new key. Flags are open to
-     * everyone. Everything else is listed for a maintainer.
+     * their own mods and releases, their own reviews, and their own new key. Anyone may add a flag.
+     * Everything else - including changing or removing a flag - is listed for a maintainer.
      */
     static int submitterCheck(Args a, PrintStream out) throws IOException, Toml.TomlException, UsageException,
             InterruptedException {
@@ -281,14 +281,20 @@ final class AccountCommands {
         Pattern review = Pattern.compile("reviews/[^/]+/([a-z0-9-]+)\\.toml(\\.sig)?");
         Pattern release = Pattern.compile("releases/[^/]+\\.toml(\\.sig)?");
         Pattern authorKey = Pattern.compile("keys/authors/([a-z0-9-]+)\\.pub");
-        for (String path : Exec.git(root, "diff", "--name-only", base + "...HEAD").lines().toList()) {
+        // No rename detection: a moved file counts as deleted at its old path and added at the new one.
+        for (String line : Exec.git(root, "diff", "--no-renames", "--name-status", base + "...HEAD").lines().toList()) {
+            String change = line.substring(0, 1);
+            String path = line.substring(line.indexOf('\t') + 1);
             Matcher m = modPath.matcher(path);
             Matcher k = authorKey.matcher(path);
             if (m.matches()) {
                 String rest = m.group(2);
                 Matcher r = review.matcher(rest);
                 if (rest.startsWith("flags/")) {
-                    continue;
+                    // Anyone may raise a flag; changing or removing one is a maintainer's decision.
+                    if (!change.equals("A")) {
+                        maintainer.add(path + ": changes or removes a flag");
+                    }
                 } else if (r.matches()) {
                     owner(path, r.group(1), login, baseAccounts, headAccounts, errors);
                 } else if (rest.matches("releases/[^/]+\\.build\\.toml(\\.sig)?")) {
@@ -312,8 +318,13 @@ final class AccountCommands {
                 Map<String, Object> before = Toml.table(baseAccounts, "accounts");
                 for (Map.Entry<String, Object> e : Toml.table(headAccounts, "accounts").entrySet()) {
                     if (!e.getValue().equals(before.get(e.getKey()))) {
-                        if (before.containsKey(e.getKey())) {
-                            maintainer.add(path + ": changes the account of '" + e.getKey() + "'");
+                        boolean knownName = Exec.tryGit(root, "cat-file", "-e",
+                                base + ":keys/authors/" + e.getKey() + ".pub").code() == 0
+                                || Exec.tryGit(root, "cat-file", "-e",
+                                        base + ":keys/reviewers/" + e.getKey() + ".pub").code() == 0;
+                        if (before.containsKey(e.getKey()) || knownName) {
+                            // Only a brand-new name (its key added in this PR) may link itself to an account.
+                            maintainer.add(path + ": links or changes the account of existing name '" + e.getKey() + "'");
                         } else {
                             owner(path, e.getKey(), login, Map.of(), headAccounts, errors);
                         }
@@ -327,9 +338,11 @@ final class AccountCommands {
         }
         errors.forEach(e -> out.println("error: " + e));
         maintainer.forEach(p -> out.println("maintainer: " + p));
-        out.println(errors.isEmpty() ? (maintainer.isEmpty() ? "OK: every change belongs to " + login
-                : "OK for " + login + "; the files above need a maintainer's review") : errors.size() + " problem(s)");
-        return errors.isEmpty() ? Main.OK : Main.ERROR;
+        // Anything not owned by the author fails the check, so a maintainer has to look before merging.
+        out.println(!errors.isEmpty() ? errors.size() + " problem(s)"
+                : !maintainer.isEmpty() ? "needs a maintainer: the files above do not belong to " + login
+                : "OK: every change belongs to " + login);
+        return errors.isEmpty() && maintainer.isEmpty() ? Main.OK : Main.ERROR;
     }
 
     /** The name's GitHub account must be the pull request's author; the base registry wins over the PR. */

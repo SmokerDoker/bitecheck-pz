@@ -53,6 +53,8 @@ public final class Verifier {
 
     private final Registry registry;
     private final Keys.PublicKeyInfo registryKey;
+    /** Releases whose verification is under way as the base of a diff review (cycle guard). */
+    private final Set<String> diffBasesInProgress = new HashSet<>();
 
     /**
      * @param registryKey the trusted registry key. A launcher must pin this key itself and not
@@ -308,10 +310,21 @@ public final class Verifier {
         if (baseJars.isEmpty()) {
             return "previous release " + previous + " has no build record";
         }
-        for (String jar : baseJars) {
-            if (verifyHash(jar).status() != Status.VERIFIED) {
-                return "previous release " + previous + " is not verified, so a full review is needed";
+        // The same jar can sit in several build records; never follow a chain of diff reviews in a circle.
+        String key = mod + "@" + previous;
+        if (!diffBasesInProgress.add(key)) {
+            return "diff reviews of " + mod + " refer to each other in a circle";
+        }
+        try {
+            // Check exactly the previous release's build record, not every record that lists the same jar.
+            Map<String, Object> build = registry.read(baseBuild);
+            for (String jar : baseJars) {
+                if (registry.blockReason(jar).isPresent() || checkCandidate(jar, baseBuild, build).status() != Status.VERIFIED) {
+                    return "previous release " + previous + " is not verified, so a full review is needed";
+                }
             }
+        } finally {
+            diffBasesInProgress.remove(key);
         }
         return null;
     }
