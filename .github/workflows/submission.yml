@@ -17,7 +17,7 @@ jobs:
     outputs:
       releases: ${{ steps.find.outputs.releases }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           fetch-depth: 0
           persist-credentials: false
@@ -68,7 +68,7 @@ jobs:
       matrix:
         include: ${{ fromJSON(needs.detect.outputs.releases) }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           ref: ${{ github.event.pull_request.base.sha }}
           persist-credentials: false
@@ -78,17 +78,26 @@ jobs:
           java-version: "21"
       - name: Build bcz
         run: ./gradlew --no-daemon -q :cli:installDist
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v8
         with:
           name: build-a-${{ matrix.key }}
           path: a
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v8
         with:
           name: build-b-${{ matrix.key }}
           path: b
       - name: Compare the two builds
         run: |
           echo "### Reproducible build: \`${{ matrix.key }}\`" >> "$GITHUB_STEP_SUMMARY"
+          # rebuilds: both builders must have compiled against the same game build (out/game.txt)
+          if [ -f a/game.txt ] || [ -f b/game.txt ]; then
+            if ! cmp -s a/game.txt b/game.txt; then
+              { echo "❌ The game updated between the two builds, re-run the workflow."; echo '```'; diff a/game.txt b/game.txt || true; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
+              echo "::error::the game updated between the two builds, re-run"
+              exit 1
+            fi
+            { echo "Both runners compiled against the same game build:"; echo '```'; cat a/game.txt; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
+          fi
           if ! diff -q a/sha256.txt b/sha256.txt >/dev/null; then
             { echo "❌ The two builds differ. See CONTRIBUTING.md for reproducible builds."; echo '```'; diff a/sha256.txt b/sha256.txt; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
             exit 1
@@ -101,7 +110,7 @@ jobs:
             cli/build/install/bcz/bin/bcz scan "$jar" --format markdown >> "$GITHUB_STEP_SUMMARY" || status=$?
           done
           exit $status
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         if: always()
         with:
           name: mod-${{ matrix.key }}

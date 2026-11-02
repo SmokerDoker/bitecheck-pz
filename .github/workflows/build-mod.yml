@@ -3,6 +3,17 @@
 # secrets and read-only access.
 #   type "rebuild":   builds the jar with the release's build command (reproducible build)
 #   type "published": takes the jar(s) the author committed in the repository at that commit
+#
+# Rebuilds compile against the game's own classes, which must not be redistributed. They come from
+# the free Project Zomboid Dedicated Server (Steam app 380870, anonymous SteamCMD login), installed
+# outside the mod source; the build command finds it through PZ_GAME_DIR (the BiteCheck Gradle
+# plugin reads it). Optional release field [build] game_branch selects a Steam beta branch.
+# The game files are not cached and not uploaded, and a jar that contains classes of the game fails
+# the build (this catches accidental bundling; the untrusted build command itself runs next to the
+# game files and is not sandboxed). The Steam build id goes into the step summary, the job
+# output and out/game.txt; the jobs comparing builder a and b fail if they used different builds.
+# Not cached on purpose: the untrusted build command runs in these jobs (also on main) and could
+# poison a shared cache that later builds of other mods would restore.
 name: Build mod (reusable)
 
 on:
@@ -38,16 +49,18 @@ permissions:
 jobs:
   build:
     runs-on: ${{ inputs.runner }}
-    timeout-minutes: 30
+    timeout-minutes: 45
+    outputs:
+      game_build: ${{ steps.game.outputs.buildid }}
     steps:
       - name: Check out the trusted bcz tool
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
         with:
           ref: ${{ inputs.tools_ref }}
           path: tools
           persist-credentials: false
       - name: Check out the registry
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
         with:
           ref: ${{ inputs.registry_ref }}
           path: registry
@@ -69,6 +82,76 @@ jobs:
         with:
           distribution: ${{ steps.info.outputs.jdk_distribution }}
           java-version: ${{ steps.info.outputs.jdk_version }}
+      - name: Check the game branch
+        id: branch
+        if: steps.info.outputs.type == 'rebuild'
+        env:
+          GAME_BRANCH: ${{ steps.info.outputs.game_branch }}
+        run: |
+          set -euo pipefail
+          branch="${GAME_BRANCH:-public}"
+          # a Steam beta branch name; it ends up on the SteamCMD command line
+          if ! [[ "$branch" =~ ^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$ ]]; then
+            echo "::error::[build] game_branch may only contain letters, digits, '-', '_' and '.'"
+            exit 1
+          fi
+          echo "branch=$branch" >> "$GITHUB_OUTPUT"
+      - name: Install the Project Zomboid Dedicated Server
+        id: game
+        if: steps.info.outputs.type == 'rebuild'
+        env:
+          BRANCH: ${{ steps.branch.outputs.branch }}
+          RUNNER_LABEL: ${{ inputs.runner }}
+        run: |
+          set -euo pipefail
+          sudo apt-get update -q
+          sudo apt-get install -y -q lib32gcc-s1 lib32stdc++6
+          steamcmd_dir="$RUNNER_TEMP/steamcmd"
+          dir="$RUNNER_TEMP/pz-server"
+          mkdir -p "$steamcmd_dir" "$dir"
+          curl -fsSL https://steamcdn-a.akamaihd.net/client/installer/steamcmd_linux.tar.gz | tar -xz -C "$steamcmd_dir"
+          beta=()
+          if [ "$BRANCH" != public ]; then beta=(-beta "$BRANCH"); fi
+          df -h "$RUNNER_TEMP"
+          # SteamCMD updates itself on the first start and now and then fails a download: retry
+          installed=false
+          for attempt in 1 2 3; do
+            log="$RUNNER_TEMP/steamcmd-$attempt.log"
+            "$steamcmd_dir/steamcmd.sh" +force_install_dir "$dir" +login anonymous \
+              +app_update 380870 "${beta[@]}" validate +quit > "$log" 2>&1 || true
+            grep -E "Success|Error|ERROR|FAILED|Invalid" "$log" || true
+            if grep -q "Success! App '380870' fully installed" "$log" && [ -f "$dir/java/projectzomboid.jar" ]; then
+              installed=true
+              break
+            fi
+            echo "::warning::SteamCMD attempt $attempt did not finish, retrying"
+            sleep 15
+          done
+          if [ "$installed" != true ]; then
+            tail -n 30 "$log"
+            echo "::error::could not install the dedicated server (Steam app 380870, branch $BRANCH)"
+            exit 1
+          fi
+          buildid="$(sed -n 's/^[[:space:]]*"buildid"[[:space:]]*"\([0-9]*\)".*/\1/p' "$dir/steamapps/appmanifest_380870.acf" | sed -n 1p)"
+          if ! [[ "$buildid" =~ ^[0-9]+$ ]]; then
+            echo "::error::no Steam build id in appmanifest_380870.acf"
+            exit 1
+          fi
+          jar_sha="$(sha256sum "$dir/java/projectzomboid.jar" | cut -d' ' -f1)"
+          {
+            echo "dir=$dir"
+            echo "buildid=$buildid"
+          } >> "$GITHUB_OUTPUT"
+          {
+            echo "app=380870"
+            echo "branch=$BRANCH"
+            echo "buildid=$buildid"
+            echo "projectzomboid_jar_sha256=$jar_sha"
+          } > "$RUNNER_TEMP/game.txt"
+          {
+            echo "Game ($RUNNER_LABEL): Project Zomboid Dedicated Server (Steam app 380870), branch \`$BRANCH\`, build id \`$buildid\`"
+            echo
+          } >> "$GITHUB_STEP_SUMMARY"
       - name: Fetch the source at the exact commit
         env:
           SOURCE: ${{ steps.info.outputs.source }}
@@ -84,22 +167,39 @@ jobs:
         working-directory: src
         env:
           BUILD_COMMAND: ${{ steps.info.outputs.command }}
+          PZ_GAME_DIR: ${{ steps.game.outputs.dir }}
         run: bash -c "$BUILD_COMMAND"
       - name: Hash the jars
         env:
           ARTIFACTS: ${{ steps.info.outputs.artifacts }}
+          PZ_GAME_DIR: ${{ steps.game.outputs.dir }}
         run: |
+          set -euo pipefail
           mkdir out
           : > out/sha256.txt
+          if [ -n "${PZ_GAME_DIR:-}" ]; then
+            # the game is compileOnly: its classes must never end up in (and be published with) a mod jar
+            unzip -Z1 "$PZ_GAME_DIR/java/projectzomboid.jar" | grep '\.class$' | sort -u > "$RUNNER_TEMP/game-classes.txt"
+            cp "$RUNNER_TEMP/game.txt" out/game.txt
+          fi
           i=0
           for artifact in $ARTIFACTS; do
             test -f "src/$artifact" || { echo "::error::artifact $artifact not found"; exit 1; }
             cp "src/$artifact" "out/$i.jar"
+            if [ -n "${PZ_GAME_DIR:-}" ]; then
+              { unzip -Z1 "out/$i.jar" | grep '\.class$' || true; } | sort -u \
+                | comm -12 - "$RUNNER_TEMP/game-classes.txt" > "$RUNNER_TEMP/bundled.txt"
+              if [ -s "$RUNNER_TEMP/bundled.txt" ]; then
+                rm -rf out
+                echo "::error::$artifact contains $(wc -l < "$RUNNER_TEMP/bundled.txt") classes of the game, which must be compileOnly, e.g. $(sed -n 1p "$RUNNER_TEMP/bundled.txt")"
+                exit 1
+              fi
+            fi
             echo "$(sha256sum "out/$i.jar" | cut -d' ' -f1)  $artifact" >> out/sha256.txt
             i=$((i + 1))
           done
           { echo "SHA-256 (${{ inputs.runner }}):"; echo '```'; cat out/sha256.txt; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: build-${{ inputs.builder }}-${{ inputs.key }}
           path: out/
