@@ -38,6 +38,7 @@ jobs:
     needs: pending
     if: needs.pending.outputs.releases != '[]'
     strategy:
+      fail-fast: false
       matrix:
         include: ${{ fromJSON(needs.pending.outputs.releases) }}
     uses: ./.github/workflows/build-mod.yml
@@ -53,6 +54,7 @@ jobs:
     needs: pending
     if: needs.pending.outputs.releases != '[]'
     strategy:
+      fail-fast: false
       matrix:
         include: ${{ fromJSON(needs.pending.outputs.releases) }}
     uses: ./.github/workflows/build-mod.yml
@@ -66,7 +68,8 @@ jobs:
 
   sign:
     needs: [pending, build-a, build-b]
-    if: needs.pending.outputs.releases != '[]'
+    # also for the other releases when one release's build failed (its own leg fails on the missing artifact)
+    if: ${{ !cancelled() && needs.pending.outputs.releases != '[]' }}
     runs-on: ubuntu-latest
     environment: registry-signing
     permissions:
@@ -136,7 +139,8 @@ jobs:
 
   index:
     needs: [pending, sign]
-    if: ${{ !cancelled() && needs.pending.result == 'success' && needs.sign.result != 'failure' }}
+    # also when one release failed: the index only lists what has a signed build record
+    if: ${{ !cancelled() && needs.pending.result == 'success' }}
     runs-on: ubuntu-latest
     environment: registry-signing
     permissions:
