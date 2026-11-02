@@ -1,0 +1,9 @@
+# Build record written by CI. Signed by the registry key.
+mod = "macos-trackpad-fix"
+version = "2026.07.31"
+method = "published"
+release_sha256 = "36093bff6a2a86f7dbb8c57fdc0c6a1e8e98320c29908b50cceb244dd84a9e67"
+artifact_paths = ["42/media/java/client/MacosTrackpadFix.jar"]
+artifact_sha256 = ["53cccf512825c505f13ddbe1c7d31a10ded367acacf139299d9bfd37bef79239"]
+built_at = "2026-11-02T16:54:03Z"
+builders = ["github-ubuntu-24.04", "github-ubuntu-22.04"]
