@@ -100,6 +100,9 @@ public final class Planner {
                     action = Boolean.TRUE.equals(current) ? Action.NONE : Action.ALLOW;
                 } else {
                     action = state.autoApproved().containsKey(sha) ? Action.ASK_IN_GAME : Action.NONE;
+                    if (!jar.build42() && action == Action.NONE) {
+                        continue; // a Build 41 copy ZombieBuddy never loads and never asks about
+                    }
                 }
                 rows.add(new Row(mod, jar, status, info, current, action, allowedAnyway, scan, suspicious));
             }

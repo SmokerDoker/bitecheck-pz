@@ -68,6 +68,25 @@ public final class LauncherSelfTest {
             expect(a.decision(w.sha("evil.jar")), Boolean.FALSE);
             expect(a.decision("ff".repeat(32)), Boolean.TRUE); // the player's own earlier decision survives
         });
+        run("flow: Build 41 copies are not listed, but a blocked one is still denied", () -> {
+            World w = World.create();
+            Path good = w.modsDir.resolve("Good");
+            Files.createDirectories(good.resolve("media/java"));
+            try (var zip = new java.util.zip.ZipOutputStream(Files.newOutputStream(good.resolve("media/java/old.jar")))) {
+                zip.putNextEntry(new java.util.zip.ZipEntry("content.txt"));
+                zip.write("unknown b41 copy".getBytes(StandardCharsets.UTF_8));
+                zip.closeEntry();
+            }
+            Files.writeString(good.resolve("media/java/bad.jar"), "blocked b41 copy");
+            w.publishIndex(Instant.now().plusSeconds(60), Map.of("verified", w.sha("good.jar"),
+                    "blocked", Hashing.sha256Hex(good.resolve("media/java/bad.jar"))));
+            Session s = w.session();
+            expect(s.rows.stream().anyMatch(r -> r.jar().path().endsWith("old.jar")), false);
+            expect(status(s, "bad.jar"), Verifier.Status.BLOCKED);
+            s.apply();
+            expect(ZombieBuddyApprovals.load(w.zb).decision(Hashing.sha256Hex(good.resolve("media/java/bad.jar"))),
+                    Boolean.FALSE);
+        });
         run("flow: approval is taken back when a mod loses verification", () -> {
             World w = World.create();
             w.session().apply();
@@ -318,16 +337,19 @@ public final class LauncherSelfTest {
         Files.writeString(both.resolve("41/media/java/old.jar"), "b41 too");
         Files.writeString(both.resolve("42.13/media/java/client/staircast.jar"), "b42");
         Files.writeString(both.resolve("common/media/java/shared.jar"), "shared");
+        // every jar is hashed (a blocked one is denied wherever it is); only the Build 42 ones are marked loaded
         List<String> jars = JavaMods.inspect(both, "1", "workshop").jars().stream()
-                .map(j -> both.relativize(j.path()).toString().replace('\\', '/')).toList();
-        expect(jars, List.of("common/media/java/shared.jar", "42.13/media/java/client/staircast.jar"));
+                .map(j -> both.relativize(j.path()).toString().replace('\\', '/') + (j.build42() ? "" : " (41)"))
+                .toList();
+        expect(jars, List.of("41/media/java/old.jar (41)", "42.13/media/java/client/staircast.jar",
+                "common/media/java/shared.jar", "media/java/client/staircast.jar (41)"));
 
         // no version folder for Build 42: the whole folder, as before
         Path old = mods.resolve("OldOnly");
         Files.createDirectories(old.resolve("media/java"));
         Files.writeString(old.resolve("mod.info"), "id=OldOnly\njavaJarFile=media/java/o.jar\n");
         Files.writeString(old.resolve("media/java/o.jar"), "o");
-        expect(JavaMods.inspect(old, null, "local").jars().size(), 1);
+        expect(JavaMods.inspect(old, null, "local").jars().get(0).build42(), true);
     }
 
     // ---- a fake computer: Zomboid folder, workshop folder, ZombieBuddy folder, published index ----
