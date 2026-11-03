@@ -1,0 +1,8 @@
+mod = "zb-macos-hide-menu-bar"
+version = "2026.10.04"
+build_sha256 = "92bb61f5bfd1cf44748ac72e53b022b19acfcb1e71ed662668bea6b1a4619a59"
+reviewer = "smokerdoker"
+verdict = "approve"
+scope = "full"
+reviewed_at = "2026-11-03T19:44:38Z"
+notes = "Full review of the source at commit 53fab6c: both Java files (202 lines). On macOS only, in borderless mode: hides the menu bar and Dock ([NSApp setPresentationOptions: 6], restored with 0) and removes the window shadow ([window setHasShadow: NO]) through LWJGL's ObjCRuntime/JNI and objc_msgSend. All classes, selectors and arguments are constants; no native library shipped or loaded, nothing from Lua or outside. Soft findings: lambdas/string concatenation. Also hides the Dock (required by macOS to hide the menu bar), not mentioned in the README. Not run on a Mac."
