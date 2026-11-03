@@ -1,0 +1,8 @@
+mod = "zb-better-fps"
+version = "2026.10.04"
+build_sha256 = "a949fed6dd11b340e9a0701aeab294fc63065a3efb67ca3d1419d26b1ee39c37"
+reviewer = "smokerdoker"
+verdict = "approve"
+scope = "full"
+reviewed_at = "2026-11-03T19:32:50Z"
+notes = "Full review of the source at commit e0159bd: all 15 Java files (2178 lines). Rendering/CPU optimizations, all off by default; Lua can only toggle option flags (ZBBetterFPS). Outside the game only java.util, java.nio buffers, VarHandle, LWJGL/JOML and Kahlua; no file, network, process or class-loading access. Soft findings: lambdas/string concatenation, VarHandle read of IsoWorld.currentCell. Patch_IsoMovingObject_* replaces collision handling per game version: correctness risk after game updates, not a security risk."
