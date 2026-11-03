@@ -27,7 +27,7 @@ BiteCheck works together with [ZombieBuddy](https://github.com/zed-0xff/ZombieBu
 - **Mods with confirmed malware** are on a block list and never load.
 - **Lua mods** are loaded by the game itself and are not affected by BiteCheck at all.
 
-Under the hood BiteCheck writes allow/deny decisions per jar hash into ZombieBuddy's `~/.zombie_buddy/mod_approvals.json` and never touches anything else. To check your mods every time you press Play in Steam, put BiteCheck into the game's launch options (the launcher's "Steam setup…" button shows the exact line, e.g. `"…\BiteCheck.bat" --wrap %command% -agentlib:zbNative --`). Without it, ZombieBuddy's own questions still protect you. Dedicated servers run BiteCheck the same way before the server starts, see [docs/SERVER.md](docs/SERVER.md). The launcher runs on Windows, macOS and Linux with the Java runtime that comes with Project Zomboid; no separate Java install is needed.
+Under the hood BiteCheck writes allow/deny decisions per jar hash into ZombieBuddy's `~/.zombie_buddy/mod_approvals.json` and never touches anything else. To check your mods every time you press Play in Steam, put BiteCheck into the game's launch options (the launcher's "Steam setup…" button shows the exact line, e.g. `"…\BiteCheck.bat" --wrap %command% -agentlib:zbNative --`). Without it, ZombieBuddy's own questions still protect you. Dedicated servers run BiteCheck the same way before the server starts, see [docs/SERVER.md](docs/SERVER.md). The launcher runs on Windows, macOS and Linux with the Java runtime that comes with Project Zomboid; no separate Java install is needed. It tells you when a newer version is released, but never downloads or installs anything itself.
 
 ## Download
 

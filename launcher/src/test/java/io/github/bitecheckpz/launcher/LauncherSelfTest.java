@@ -16,6 +16,7 @@ import java.time.temporal.ChronoUnit;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 
 /** Dependency-free launcher tests. Run with {@code ./gradlew check}. */
 public final class LauncherSelfTest {
@@ -54,6 +55,20 @@ public final class LauncherSelfTest {
             List<Path> libs = Platform.parseLibraryFolders(vdf);
             expect(libs.size(), 2);
             expect(libs.get(1).toString().endsWith("SteamLibrary"), true);
+        });
+        run("update check: reads the version from the release redirect only", () -> {
+            String base = "https://github.com/SmokerDoker/bitecheck-pz/releases/tag/";
+            expect(UpdateCheck.versionFromLocation(base + "v0.1.2"), Optional.of("0.1.2"));
+            expect(UpdateCheck.versionFromLocation(base + "v0.2.0-rc1"), Optional.empty());
+            expect(UpdateCheck.versionFromLocation(base + "v0.1.2\nhttps://evil.example"), Optional.empty());
+            expect(UpdateCheck.versionFromLocation(null), Optional.empty());
+            expect(UpdateCheck.isNewer("0.1.2", "0.1.1"), true);
+            expect(UpdateCheck.isNewer("0.2", "0.1.9"), true);
+            expect(UpdateCheck.isNewer("0.1.10", "0.1.9"), true);
+            expect(UpdateCheck.isNewer("0.1.1", "0.1.1"), false);
+            expect(UpdateCheck.isNewer("0.1.0", "0.1.1"), false);
+            expect(UpdateCheck.isNewer("0.2.0", "0.2.0-rc1"), false);
+            expect(UpdateCheck.note(Config.empty()), Optional.empty()); // test classes have no version: no request
         });
         run("flow: verified allowed, unverified untouched, blocked denied", () -> {
             World w = World.create();
@@ -392,7 +407,8 @@ public final class LauncherSelfTest {
                     + "zomboid_dir = " + q(w.root.resolve("Zomboid").toString()) + "\n"
                     + "zombiebuddy_dir = " + q(w.zb.toString()) + "\n"
                     + "workshop_dir = " + q(workshop.toString()) + "\n"
-                    + "steam_dir = " + q(w.root.resolve("no-steam").toString()) + "\n");
+                    + "steam_dir = " + q(w.root.resolve("no-steam").toString()) + "\n"
+                    + "update_check = \"off\"\n");
             w.publishIndex(Instant.now(), Map.of("verified", w.sha("good.jar"), "blocked", w.sha("evil.jar")));
             return w;
         }
