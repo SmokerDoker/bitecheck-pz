@@ -1,0 +1,9 @@
+# Build record written by CI. Signed by the registry key.
+mod = "zb-better-fps"
+version = "2026.10.04"
+method = "published"
+release_sha256 = "4de06897b98c1652414e054136c4b1a5c5280d5bdf2f8983b2157c533146393b"
+artifact_paths = ["41/media/java/client/ZBBetterFPS-2x.jar", "41/media/java/client/ZBBetterFPS.jar", "42.12/media/java/client/ZBBetterFPS-2x.jar", "42.12/media/java/client/ZBBetterFPS.jar", "42.13/media/java/client/ZBBetterFPS-2x.jar", "42.13/media/java/client/ZBBetterFPS.jar", "42.20/media/java/client/ZBBetterFPS.jar"]
+artifact_sha256 = ["096309efd5ce372563fcb3127adccee40884871a6460277e17b1632e116295b8", "663a11ca40eb3eb9dcb20f5ad5ae4c8c2cc33d469f8de929cf9bb6b679fe55b5", "752a5dce1b1641318b4703a23f316ca027878293ba07ebbb761db83cc9601a8f", "e651ec5cf3466741e67304d757cbe8c4503a579b152ce176ed5af87547a3dbdd", "d79cb445a557e88dce1b45afc7c4a3d57c4c8f48a60003b925a7cdfbb3f1ee70", "f9a7e2ca230cf1e4ba7c033563083e885cd33c4faca5c5abfffbe8bcb3477662", "c92e32854a758316309e54a4c02bd60aefe1c158111773a2562f21a21455470b"]
+built_at = "2026-11-03T19:32:03Z"
+builders = ["github-ubuntu-24.04", "github-ubuntu-22.04"]
