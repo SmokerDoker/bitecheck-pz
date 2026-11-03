@@ -18,7 +18,7 @@ Requirements for a release:
 
 - Build 42 or newer (ZombieBuddy does not load Java mods in Build 41). CI builds against the current public version of the game unless `game_branch` says otherwise.
 - No obfuscation.
-- No native libraries, no runtime code loading, no process execution.
+- No native libraries, no runtime code loading, no process execution. Calling operating system functions through the libraries the game already ships (e.g. LWJGL's `JNI` / `ObjCRuntime`) is allowed when every function, selector and argument is a constant in the code.
 - Network access and file access outside `~/Zomboid` must be explained in the mod description and will be checked carefully in review.
 - Game classes from The Indie Stone are referenced at compile time only (`compileOnly`) and never bundled. CI fails a build whose jar contains game classes.
 
