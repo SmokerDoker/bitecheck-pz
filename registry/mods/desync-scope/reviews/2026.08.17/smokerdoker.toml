@@ -1,0 +1,8 @@
+mod = "desync-scope"
+version = "2026.08.17"
+build_sha256 = "67c8db44772e0687abbf1e2211c915fffa07d44e080342915e01080121431d72"
+reviewer = "smokerdoker"
+verdict = "approve"
+scope = "full"
+reviewed_at = "2026-11-03T19:54:54Z"
+notes = "Full review of the source at commit 68d3bd5: all 19 Java files (1492 lines). Measures multiplayer desync and counts packets; patches only read, no packet is changed or sent; no network, process or class-loading access. Files: only report-*.txt / samples-*.csv with fixed names in ~/Zomboid/DesyncScope (the cache-dir lookup fails, so it always uses the user.home fallback). Lua (DesyncScope) takes no paths; string arguments only select a stats stream by name. Reflection: all class/method/field names are constants, only getters are called. Shutdown hook only closes the CSV. Soft findings: lambdas/string concatenation. Correctness only: zombie.iso.IsoPlayer is the wrong class name, so the player.local stream stays empty; -cachedir is ignored."
