@@ -1,0 +1,4 @@
+bitecheck-signature-v1
+key-id: 0e851eed1114101d
+file-sha256: 88010acf032ab66947286262011658db0766c10389205e2e27bf6ed8c1de3a1a
+signature: bYplhcStTC6ihFZw0Vk/uHG10/Im+M+6HOhaHdGopZYOa0sYkhNmtWKLJQneWkAJu8+YHEanyxYgnlJHk4E1DQ==

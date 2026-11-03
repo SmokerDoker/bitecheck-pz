@@ -1,0 +1,7 @@
+id = "bitecheck-test-mod"
+name = "BiteCheck Test Mod"
+author = "smokerdoker"
+source = "https://github.com/SmokerDoker/bitecheck-test-mod"
+license = "MIT"
+workshop_id = ""
+status = "active"
