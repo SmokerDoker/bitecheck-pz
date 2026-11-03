@@ -1,0 +1,8 @@
+mod = "staircast"
+version = "1.1.0"
+build_sha256 = "0b56cb1b067cefa95979e8c4e1896837cd6bc1ebefb41c328b016f8a331061df"
+reviewer = "smokerdoker"
+verdict = "approve"
+scope = "full"
+reviewed_at = "2026-11-03T02:17:38Z"
+notes = "No file, network or process access, no Lua access. Writes only in-memory game state: assigns the room of the floor below to the upper square and clears its exterior flag (kept by default, AssignRoomPermanently)."
