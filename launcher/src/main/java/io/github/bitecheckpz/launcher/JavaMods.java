@@ -18,10 +18,11 @@ import java.util.stream.Stream;
  * Finds installed Java mods: every mod folder whose mod.info (in the folder itself, in
  * {@code common/} or in a version folder like {@code 42/}) declares a {@code javaJarFile}.
  *
- * <p>All jars in the folders Build 42 loads from ({@code common/} and version folders 42 or newer)
- * are collected, not only the one ZombieBuddy will pick for the current version. BiteCheck only
- * ever pre-approves verified hashes, so including extra jars is harmless and avoids
- * re-implementing ZombieBuddy's version selection.
+ * <p>All jars inside such a mod are collected, not only the one ZombieBuddy will pick for the
+ * current version. BiteCheck only ever pre-approves verified hashes, so including extra jars is
+ * harmless and avoids re-implementing ZombieBuddy's version selection; a blocked or flagged jar
+ * is denied wherever it is. Jars outside the folders Build 42 loads from (Build 41 copies in the
+ * mod folder itself or in {@code 41/}) are marked, so they are not shown as waiting for a question.
  */
 public final class JavaMods {
 
@@ -31,7 +32,8 @@ public final class JavaMods {
     private static final int MAX_DEPTH = 8;
     private static final Pattern VERSION_DIR = Pattern.compile("\\d{1,9}(\\.\\d+)*");
 
-    public record Jar(Path path, String sha256) {
+    /** @param build42 in {@code common/} or a version folder 42 or newer (or the mod has none of them) */
+    public record Jar(Path path, String sha256, boolean build42) {
     }
 
     public record JavaMod(String id, String name, Path folder, String workshopId, String source, List<Jar> jars) {
@@ -117,14 +119,13 @@ public final class JavaMods {
         if (!java) {
             return null;
         }
+        List<Path> build42 = build42Folders(modFolder);
         List<Jar> jars = new ArrayList<>();
-        for (Path dir : build42Folders(modFolder)) {
-            try (Stream<Path> files = Files.walk(dir, MAX_DEPTH)) {
-                for (Path p : files.filter(Files::isRegularFile)
-                        .filter(p -> p.getFileName().toString().toLowerCase(Locale.ROOT).endsWith(".jar"))
-                        .sorted().toList()) {
-                    jars.add(new Jar(p, Hashing.sha256Hex(p)));
-                }
+        try (Stream<Path> files = Files.walk(modFolder, MAX_DEPTH)) {
+            for (Path p : files.filter(Files::isRegularFile)
+                    .filter(p -> p.getFileName().toString().toLowerCase(Locale.ROOT).endsWith(".jar"))
+                    .sorted().toList()) {
+                jars.add(new Jar(p, Hashing.sha256Hex(p), build42.stream().anyMatch(p::startsWith)));
             }
         }
         if (jars.isEmpty()) {
@@ -137,9 +138,7 @@ public final class JavaMods {
 
     /**
      * The folders Build 42 loads the mod from: {@code common/} and the version folders of Build 42
-     * or newer. Jars outside them (Build 41 jars in the mod folder itself or in {@code 41/}) are
-     * never loaded, so they are not reported. Without a version folder for Build 42 the whole
-     * folder is searched, as before.
+     * or newer. Without a version folder for Build 42, the whole mod folder.
      */
     private static List<Path> build42Folders(Path modFolder) throws IOException {
         List<Path> folders = new ArrayList<>();
