@@ -1,0 +1,9 @@
+# Build record written by CI. Signed by the registry key.
+mod = "zb-lua-perf-mon"
+version = "2026.10.04"
+method = "published"
+release_sha256 = "818706a97ebe834a4e588c7b0893813c88c5f9304f335dd587d386139d2aa02c"
+artifact_paths = ["42/media/java/client/ZBLuaPerfMon-2x.jar", "42/media/java/client/ZBLuaPerfMon.jar"]
+artifact_sha256 = ["2f08c5bb612dc0f0d7af29228cea59250f0f68cd599734ed24f3b82ecf011c28", "89fdff2b566cd0b9ca36e67f17e34313ef3097c470d5cdeec975e933b4d0a615"]
+built_at = "2026-11-03T19:32:51Z"
+builders = ["github-ubuntu-24.04", "github-ubuntu-22.04"]
