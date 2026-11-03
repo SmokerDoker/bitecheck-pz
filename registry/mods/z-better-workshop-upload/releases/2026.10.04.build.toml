@@ -1,0 +1,9 @@
+# Build record written by CI. Signed by the registry key.
+mod = "z-better-workshop-upload"
+version = "2026.10.04"
+method = "published"
+release_sha256 = "190ef35b99d1ed2c5c276f013cb58a1c72d8ef5e231ae93ec13da33aa12a1ba0"
+artifact_paths = ["42/media/java/client/ZBetterWorkshopUpload-2x.jar", "42/media/java/client/ZBetterWorkshopUpload.jar"]
+artifact_sha256 = ["05b458aa645169d8a4f98a80aaf3673ac5ec2c31dbada4f05321c02eaa22bc77", "e1b974fc5fb4360290145f16d47d713784e3108025fcfc0d75c9087f1cda5d3e"]
+built_at = "2026-11-03T19:20:08Z"
+builders = ["github-ubuntu-24.04", "github-ubuntu-22.04"]
