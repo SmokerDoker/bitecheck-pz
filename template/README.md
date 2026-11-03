@@ -19,6 +19,10 @@ into a new, public repository of your own. Then rename the example everywhere:
 | Registry entry | `bitecheck.toml` (`id`, `name`, `license`, `workshop_id`) |
 | License | `LICENSE` (any license that allows review and rebuilding, e.g. MIT) |
 
+On Windows, git does not keep the executable bit of the copied `gradlew`. Set it once before your
+first commit: `git update-index --add --chmod=+x gradlew` (BiteCheck's CI copes without it, but
+Linux and macOS users of your repository need it).
+
 ## Layout
 
 ```
