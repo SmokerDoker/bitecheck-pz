@@ -76,7 +76,7 @@ Your mod is never blocked while it waits for review: players can load it as an u
 - [x] CI rebuilds mods against the Project Zomboid dedicated server (only its `projectzomboid.jar`, fetched with DepotDownloader)
 - [x] Reviewer commands: `bcz status`, `inspect` (with diffs to the last verified release), `approve`, `reject`, `flag`
 - [x] Key revocation (`keys/revoked.toml`), reviewer levels (`bcz trust`, `bcz reviewers`), ownership check for pull requests
-- [ ] Gradle plugin published to the Plugin Portal
+- [x] Gradle plugin published to the Plugin Portal (`io.github.smokerdoker.bitecheck` 0.1.0)
 
 ## The `bcz` command line tool
 
