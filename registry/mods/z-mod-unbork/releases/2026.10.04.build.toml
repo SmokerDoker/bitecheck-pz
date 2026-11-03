@@ -1,0 +1,9 @@
+# Build record written by CI. Signed by the registry key.
+mod = "z-mod-unbork"
+version = "2026.10.04"
+method = "published"
+release_sha256 = "3e8bf22d14e914774d92ba2b38d87aea2fd4ed73d07d184fc9b9024a67621422"
+artifact_paths = ["42/media/java/shared/ZModUnbork-2x.jar", "42/media/java/shared/ZModUnbork.jar"]
+artifact_sha256 = ["051c3564d5f87bd77ce269fb98f9d467ec5e5a3928a33c69df206781bf9435c8", "c9f36cc8cdef4ff05f26858c472d50ad0f961cd87750c05e708d6b00593b712e"]
+built_at = "2026-11-03T19:27:54Z"
+builders = ["github-ubuntu-24.04", "github-ubuntu-22.04"]
