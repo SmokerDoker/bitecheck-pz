@@ -71,6 +71,22 @@ A review covers the Java code and the build files (for `rebuild` and `workshop` 
 
 A review must state what was checked (full review or diff to the previous version) and explain every soft scanner finding. If you find something malicious, **flag it immediately** — a critical flag removes the approval for all players until it is resolved.
 
+### How to review
+
+A Java mod runs with the player's rights. What a malicious one would do — steal files (Steam login, browser data, SSH keys), download and run code, change other mods or jars, mine crypto, open a multiplayer backdoor, destroy data — needs specific APIs. The review starts from them:
+
+1. **Trust the basis first.** `bcz inspect` must show the jar matching the source (CI's rebuild hash or the source check) and no hard findings. Then read the source, not the jar.
+2. **Know the claim.** Read the README / mod description and count the files and lines. The question for everything below: does the code do what it claims, and nothing else?
+3. **Filter by APIs outside the game.** List the imports of all files (`grep -h '^import' *.java | sort -u`) and look for files (`java.io`, `java.nio.file`), network (`java.net`), processes (`ProcessBuilder`, `Runtime.exec`), loading code (`ClassLoader`, `defineClass`, `System.load`), `Unsafe`, `ScriptEngine` and deserialization (`ObjectInputStream`). Also grep for fully qualified names (`java.net.` …), which need no import.
+4. **Find the entry points.** What runs by itself: `Main.main`, static initializers, the `@Patch` targets. What Lua can call: `@Exposer.LuaClass`, `@LuaMethod`. A path, URL or class name that comes from Lua is a warning sign.
+5. **Explain every soft finding.** Most "method handles" are lambdas or string concatenation; say where and why for each one.
+6. **Follow the data at the sensitive places.** Files: which paths, built from constants or from outside, do they stay in `~/Zomboid`? Network: where to, what is sent? Reflection: constant names are fine; names built or decoded at run time are not.
+7. **Place the patches.** Separate correctness risks (e.g. a game method replaced per game version, which breaks on updates) from security risks. In multiplayer, check that the server does not act on client packets or commands without checking who sent them.
+
+**How deep:** in proportion to the risk. Read small mods without sensitive APIs completely. In large ones, read the entry points and every file that uses a sensitive API completely and skim pure logic (rendering math, item stats): anything dangerous needs the APIs from step 3. Obfuscation is a red flag on its own — Base64 strings, byte arrays, XOR, strangely assembled strings have no place in mod code.
+
+**Decide:** approve when the code matches its description and every finding is explained (the notes say what you checked and how you explained the findings, correctness risks included); reject when something is wrong but not malicious, e.g. unexplained file access outside `~/Zomboid`; flag on real suspicion of malice.
+
 ## 3. Work on BiteCheck itself (developers)
 
 - Open an issue before starting larger changes, so we can agree on the approach.
