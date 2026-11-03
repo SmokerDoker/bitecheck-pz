@@ -165,6 +165,12 @@ jobs:
             echo "::warning::BITECHECK_REGISTRY_KEY is not set; build record not signed"
             exit 0
           fi
+          # Runs are serialized, but this one chose its releases when it started; an earlier run
+          # that waited for the same approval may have signed this release since.
+          if [ -f "${RELEASE%.toml}.build.toml" ]; then
+            echo "::notice::${RELEASE#registry/mods/} already has a build record (signed by an earlier run)"
+            exit 0
+          fi
           umask 077
           printf '%s\n' "$REGISTRY_KEY" > "$RUNNER_TEMP/registry.key"
           bcz=cli/build/install/bcz/bin/bcz
