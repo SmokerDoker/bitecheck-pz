@@ -77,6 +77,8 @@ Your mod is never blocked while it waits for review: players can load it as an u
 - [x] Reviewer commands: `bcz status`, `inspect` (with diffs to the last verified release), `approve`, `reject`, `flag`
 - [x] Key revocation (`keys/revoked.toml`), reviewer levels (`bcz trust`, `bcz reviewers`), ownership check for pull requests
 - [x] Gradle plugin published to the Plugin Portal (`io.github.smokerdoker.bitecheck` 0.1.0)
+- [x] Submission tested end to end with the template: `bcz submit` by hand and the template's GitHub Action; CI's jar is identical to a local Windows build
+- [ ] Submission from a fork tested (an author without write access to the registry)
 
 ## The `bcz` command line tool
 

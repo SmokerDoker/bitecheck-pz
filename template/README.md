@@ -90,6 +90,10 @@ Add two secrets to your repository (Settings > Secrets and variables > Actions):
 | `BITECHECK_AUTHOR_KEY` | your private key: the content of `~/.bitecheck/keys/<name>.key` |
 | `BITECHECK_GITHUB_TOKEN` | a personal access token (classic) with the scopes `public_repo` and `workflow`; the workflow's own token cannot open a pull request in the registry |
 
+Paste both values into the web form. If the workflow later reports `Bad credentials`, the token
+secret does not hold a valid token (for example because the clipboard held something else); set it
+again.
+
 Then tag a release:
 
 ```sh
