@@ -1,0 +1,8 @@
+mod = "z-item-tiers"
+version = "2026.10.04"
+build_sha256 = "2deb4f4709765f175c8bfa35f9321deec5befb7d2c375e3fdb8e50dce63f2383"
+reviewer = "smokerdoker"
+verdict = "approve"
+scope = "full"
+reviewed_at = "2026-11-03T19:18:30Z"
+notes = "Full review of the source at commit 3958fd7: all 6 Java files (144 lines). Only game item classes and java.util; Lua can only reset, set and get in-memory float attributes per item ID (ZItemTiersHelper). Soft findings: lambda in CustomAttributeStorage. Lua part requires the zdk mod (not part of this review)."
