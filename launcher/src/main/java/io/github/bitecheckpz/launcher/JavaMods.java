@@ -11,15 +11,17 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.regex.Pattern;
 import java.util.stream.Stream;
 
 /**
  * Finds installed Java mods: every mod folder whose mod.info (in the folder itself, in
  * {@code common/} or in a version folder like {@code 42/}) declares a {@code javaJarFile}.
  *
- * <p>All jars inside such a mod are collected, not only the one ZombieBuddy will pick for the
- * current version. BiteCheck only ever pre-approves verified hashes, so including extra jars is
- * harmless and avoids re-implementing ZombieBuddy's version selection.
+ * <p>All jars in the folders Build 42 loads from ({@code common/} and version folders 42 or newer)
+ * are collected, not only the one ZombieBuddy will pick for the current version. BiteCheck only
+ * ever pre-approves verified hashes, so including extra jars is harmless and avoids
+ * re-implementing ZombieBuddy's version selection.
  */
 public final class JavaMods {
 
@@ -27,6 +29,7 @@ public final class JavaMods {
     static final String ZOMBIE_BUDDY_PACKAGE = "me.zed_0xff.zombie_buddy";
 
     private static final int MAX_DEPTH = 8;
+    private static final Pattern VERSION_DIR = Pattern.compile("\\d{1,9}(\\.\\d+)*");
 
     public record Jar(Path path, String sha256) {
     }
@@ -115,11 +118,13 @@ public final class JavaMods {
             return null;
         }
         List<Jar> jars = new ArrayList<>();
-        try (Stream<Path> files = Files.walk(modFolder, MAX_DEPTH)) {
-            for (Path p : files.filter(Files::isRegularFile)
-                    .filter(p -> p.getFileName().toString().toLowerCase(Locale.ROOT).endsWith(".jar"))
-                    .sorted().toList()) {
-                jars.add(new Jar(p, Hashing.sha256Hex(p)));
+        for (Path dir : build42Folders(modFolder)) {
+            try (Stream<Path> files = Files.walk(dir, MAX_DEPTH)) {
+                for (Path p : files.filter(Files::isRegularFile)
+                        .filter(p -> p.getFileName().toString().toLowerCase(Locale.ROOT).endsWith(".jar"))
+                        .sorted().toList()) {
+                    jars.add(new Jar(p, Hashing.sha256Hex(p)));
+                }
             }
         }
         if (jars.isEmpty()) {
@@ -128,6 +133,31 @@ public final class JavaMods {
         String fallback = modFolder.getFileName().toString();
         return new JavaMod(id != null ? id : fallback, name != null ? name : fallback, modFolder, workshopId,
                 source, jars);
+    }
+
+    /**
+     * The folders Build 42 loads the mod from: {@code common/} and the version folders of Build 42
+     * or newer. Jars outside them (Build 41 jars in the mod folder itself or in {@code 41/}) are
+     * never loaded, so they are not reported. Without a version folder for Build 42 the whole
+     * folder is searched, as before.
+     */
+    private static List<Path> build42Folders(Path modFolder) throws IOException {
+        List<Path> folders = new ArrayList<>();
+        for (Path sub : list(modFolder)) {
+            String name = sub.getFileName().toString();
+            if (Files.isDirectory(sub) && VERSION_DIR.matcher(name).matches()
+                    && Integer.parseInt(name.split("\\.")[0]) >= 42) {
+                folders.add(sub);
+            }
+        }
+        if (folders.isEmpty()) {
+            return List.of(modFolder);
+        }
+        Path common = modFolder.resolve("common");
+        if (Files.isDirectory(common)) {
+            folders.add(0, common);
+        }
+        return folders;
     }
 
     /** Reads mod.info as lower-case keys; the first value of a key wins (like ZombieBuddy). */

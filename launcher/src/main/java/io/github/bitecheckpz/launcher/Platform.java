@@ -76,11 +76,11 @@ public final class Platform {
         return config.path("zombiebuddy_dir").orElse(home.resolve(".zombie_buddy"));
     }
 
-    /** Steam installation folders that exist on this machine. */
+    /** Steam installation folders that exist on this machine; a configured steam_dir replaces the search. */
     public List<Path> steamRoots() {
         Set<Path> candidates = new LinkedHashSet<>();
         config.path("steam_dir").ifPresent(candidates::add);
-        switch (os) {
+        if (candidates.isEmpty()) switch (os) {
             case WINDOWS -> {
                 windowsRegistrySteamPath().ifPresent(candidates::add);
                 candidates.add(Path.of(envOr("ProgramFiles(x86)", "C:\\Program Files (x86)"), "Steam"));
