@@ -1,0 +1,9 @@
+# Build record written by CI. Signed by the registry key.
+mod = "desync-scope"
+version = "2026.08.17"
+method = "published"
+release_sha256 = "5db9a95a888f0c541c8efcf9ad537f86b146071e4aa3f8cf35474746e9a4bc1a"
+artifact_paths = ["DesyncScope/42/media/java/DesyncScope.jar"]
+artifact_sha256 = ["780c7bd426c025faad73bfedf09d1efc0cbdbbe7034ce7fcc9916ecbce0b0089"]
+built_at = "2026-11-03T19:16:28Z"
+builders = ["github-ubuntu-24.04", "github-ubuntu-22.04"]
