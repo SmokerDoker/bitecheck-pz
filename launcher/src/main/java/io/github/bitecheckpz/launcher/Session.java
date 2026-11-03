@@ -63,6 +63,7 @@ public final class Session {
         if (platform.workshopContentDirs().isEmpty() && platform.steamRoots().isEmpty()) {
             session.notes.add("Steam was not found. Set steam_dir in " + biteCheckDir.resolve("config.toml") + ".");
         }
+        UpdateCheck.note(config).ifPresent(session.notes::add);
         return session;
     }
 
