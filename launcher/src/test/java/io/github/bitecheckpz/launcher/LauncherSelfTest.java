@@ -305,6 +305,29 @@ public final class LauncherSelfTest {
         expect(found.jars().get(0).sha256(), Hashing.sha256Hex("jar".getBytes(StandardCharsets.UTF_8)));
         expect(JavaMods.inspect(lua, null, "local"), null);
         expect(JavaMods.inspect(zb, null, "local"), null);
+
+        // like Staircast: a Build 41 copy in the mod folder itself and in 41/, which Build 42 never loads
+        Path both = mods.resolve("Staircast");
+        Files.createDirectories(both.resolve("42.13/media/java/client"));
+        Files.createDirectories(both.resolve("media/java/client"));
+        Files.createDirectories(both.resolve("41/media/java"));
+        Files.createDirectories(both.resolve("common/media/java"));
+        Files.writeString(both.resolve("mod.info"), "id=Staircast\njavaJarFile=media/java/client/staircast.jar\n");
+        Files.writeString(both.resolve("42.13/mod.info"), "id=Staircast\njavaJarFile=media/java/client/staircast.jar\n");
+        Files.writeString(both.resolve("media/java/client/staircast.jar"), "b41");
+        Files.writeString(both.resolve("41/media/java/old.jar"), "b41 too");
+        Files.writeString(both.resolve("42.13/media/java/client/staircast.jar"), "b42");
+        Files.writeString(both.resolve("common/media/java/shared.jar"), "shared");
+        List<String> jars = JavaMods.inspect(both, "1", "workshop").jars().stream()
+                .map(j -> both.relativize(j.path()).toString().replace('\\', '/')).toList();
+        expect(jars, List.of("common/media/java/shared.jar", "42.13/media/java/client/staircast.jar"));
+
+        // no version folder for Build 42: the whole folder, as before
+        Path old = mods.resolve("OldOnly");
+        Files.createDirectories(old.resolve("media/java"));
+        Files.writeString(old.resolve("mod.info"), "id=OldOnly\njavaJarFile=media/java/o.jar\n");
+        Files.writeString(old.resolve("media/java/o.jar"), "o");
+        expect(JavaMods.inspect(old, null, "local").jars().size(), 1);
     }
 
     // ---- a fake computer: Zomboid folder, workshop folder, ZombieBuddy folder, published index ----
