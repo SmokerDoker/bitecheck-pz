@@ -1,0 +1,8 @@
+mod = "zb-lua-perf-mon"
+version = "2026.10.04"
+build_sha256 = "e1a893d6a2d3d8b445f0492ebb3969f88fb58f86d41bb532e603f48d5904f350"
+reviewer = "smokerdoker"
+verdict = "approve"
+scope = "full"
+reviewed_at = "2026-11-03T19:33:03Z"
+notes = "Full review of the source at commit f95adf9: all 13 Java files (1517 lines). Times protected Lua calls (System.nanoTime) and draws the slowest as an overlay; arguments are only read. Lua can only set display/logging options (ZBLuaPerfMon), no paths or strings. Soft findings: lambdas/string concatenation; files: DebugLogger would write to the Zomboid cache dir (ZBLuaPerfMon_debug.log) but every call to it is commented out; PathParser only compares path strings (ZomboidFileSystem read only). No network, process or class-loading access. Not a security issue: per-call overhead while enabled; the -2x jar was compiled against the ZombieBuddy 2.x package name."
