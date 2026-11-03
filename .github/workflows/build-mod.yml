@@ -196,7 +196,13 @@ jobs:
           BUILD_COMMAND: ${{ steps.info.outputs.command }}
           PZ_GAME_DIR: ${{ steps.game.outputs.dir }}
           ZOMBIEBUDDY_JAR: ${{ steps.zombiebuddy.outputs.jar }}
-        run: bash -c "$BUILD_COMMAND"
+        run: |
+          # Repositories created on Windows often store gradlew without the executable bit.
+          if [ -f gradlew ] && [ ! -x gradlew ]; then
+            chmod +x gradlew
+            echo "::notice::gradlew is not executable in the repository; made it executable for the build (fix: git update-index --chmod=+x gradlew)"
+          fi
+          bash -c "$BUILD_COMMAND"
       - name: Hash the jars
         env:
           ARTIFACTS: ${{ steps.info.outputs.artifacts }}
