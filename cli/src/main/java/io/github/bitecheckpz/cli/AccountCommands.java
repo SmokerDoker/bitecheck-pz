@@ -110,10 +110,15 @@ final class AccountCommands {
             throw new IOException("commit must be a full 40-character hash");
         }
         String version = version(a, project, commit);
-        if (!commit.equals(Exec.tryGit(project, "rev-parse", commit + "^{commit}").output())
-                || Exec.run(project, "gh", "api", "repos/" + sourceRepo + "/commits/" + commit, "--jq", ".sha")
-                        .code() != 0) {
-            throw new IOException("commit " + commit.substring(0, 7) + " is not public on GitHub yet: push it first");
+        if (!commit.equals(Exec.tryGit(project, "rev-parse", commit + "^{commit}").output())) {
+            throw new IOException("commit " + commit.substring(0, 7) + " is not in this repository");
+        }
+        var published = Exec.run(project, "gh", "api", "repos/" + sourceRepo + "/commits/" + commit, "--jq", ".sha");
+        if (published.code() != 0) {
+            String why = published.output();
+            throw new IOException(why.contains("HTTP 404") || why.contains("HTTP 422")
+                    ? "commit " + commit.substring(0, 7) + " is not public on " + sourceRepo + " yet: push it first"
+                    : "could not check commit " + commit.substring(0, 7) + " on GitHub:\n" + why);
         }
 
         Path keyFile = a.option("key").map(Path::of).orElse(null);

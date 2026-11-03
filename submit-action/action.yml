@@ -140,13 +140,16 @@ runs:
     - name: Submit the release
       shell: bash
       env:
-        GH_TOKEN: ${{ inputs.github-token }}
+        TOKEN: ${{ inputs.github-token }}
         BCZ: ${{ steps.bcz.outputs.bcz }}
         KEY: ${{ steps.key.outputs.key }}
         VERSION: ${{ steps.check.outputs.version }}
         BITECHECK_REGISTRY: ${{ inputs.registry }}
       run: |
         set -euo pipefail
+        # Secrets set on Windows (e.g. piped in PowerShell) often end with "\r\n"; tokens have no spaces.
+        GH_TOKEN="$(printf '%s' "$TOKEN" | tr -d '[:space:]')"
+        export GH_TOKEN
         "$BCZ" submit --version "$VERSION" --commit "$GITHUB_SHA" --key "$KEY"
 
     - name: Delete the signing key
