@@ -1,0 +1,9 @@
+mod = "bitecheck-test-mod"
+version = "1.0.0"
+commit = "a24c669a935f67122fc74ec30b18f0e38ba45d22"
+
+[build]
+type = "rebuild"
+jdk = "temurin-25"
+command = "./gradlew --no-daemon bitecheckMod"
+artifacts = ["build/bitecheck/42/media/java/client/MyMod.jar"]
