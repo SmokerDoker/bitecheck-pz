@@ -1,0 +1,9 @@
+# Build record written by CI. Signed by the registry key.
+mod = "z-item-tiers"
+version = "2026.10.04"
+method = "published"
+release_sha256 = "224a846fcfdf80fbb0c49866895e7cd8b3206a5bbf8fcf1c9e0530af1025134c"
+artifact_paths = ["42.13/media/java/shared/ZItemTiers-2x.jar", "42.13/media/java/shared/ZItemTiers.jar"]
+artifact_sha256 = ["61f6f0693ba4442ce7ed024a4297aea90656bba9f83892ddf2d3aee5207a4deb", "9adc1e46eccb2d67876d422cf57bb97284264da8b8d6ffd3b551a3b2b276191c"]
+built_at = "2026-11-03T19:10:18Z"
+builders = ["github-ubuntu-24.04", "github-ubuntu-22.04"]
