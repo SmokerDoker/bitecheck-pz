@@ -1,0 +1,9 @@
+# Build record written by CI. Signed by the registry key.
+mod = "real-reset"
+version = "2026.10.14"
+method = "published"
+release_sha256 = "62e81ef7f0ece701b61cfb58c48b0752a0eedacaaf214d503b8a19352b799edd"
+artifact_paths = ["Contents/mods/RealReset/42/media/java/RealReset.jar"]
+artifact_sha256 = ["97440e953b2326be47bb037223a7425ffee445ebeb8f6ac3a94b3387d3e6d85b"]
+built_at = "2026-11-03T19:18:51Z"
+builders = ["github-ubuntu-24.04", "github-ubuntu-22.04"]
