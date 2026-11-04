@@ -183,7 +183,7 @@ jobs:
           rm -f "$RUNNER_TEMP/registry.key"
           $bcz verify-sig "$build" --pub keys/registry.pub
           git config user.name "BiteCheck Registry"
-          git config user.email "registry@users.noreply.github.com"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add "$build" "$build.sig"
           git commit -q -m "Build record for ${RELEASE#registry/mods/}"
           git pull -q --rebase origin main
@@ -234,7 +234,7 @@ jobs:
           $bcz verify-sig "$out/index.toml" --pub keys/registry.pub
           printf 'Signed BiteCheck index, published by CI. Do not edit.\n' > "$out/README.md"
           git config user.name "BiteCheck Registry"
-          git config user.email "registry@users.noreply.github.com"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git checkout -q --orphan index-publish
           git rm -rq --cached .
           git clean -fdxq -e cli/build
