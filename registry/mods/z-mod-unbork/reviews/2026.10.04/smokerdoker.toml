@@ -1,0 +1,8 @@
+mod = "z-mod-unbork"
+version = "2026.10.04"
+build_sha256 = "af043af6bfa12f04d89f7a42f8753a4b00d802fa60a0f9168c7a1888b25dfd64"
+reviewer = "smokerdoker"
+verdict = "approve"
+scope = "full"
+reviewed_at = "2026-11-04T15:50:13Z"
+notes = "Compatibility fixes for older mods on newer B42 builds. Java part (143 lines): exposes MapItem.getSymbols to Lua (read-only), makes AnimNode.Parse return null instead of throwing an NPE, strips \"-- comment\" text from item header lines in ScriptParser.stripComments, drops item recipe-map entries pointing to missing evolved recipes, and logs nil reads in KahluaThread.tableget (log only, but on a hot path). No file, network, process, native code, class loading or reflection. ZModUnbork.jar matches the source at a9b3405; ZModUnbork-2x.jar is byte-identical to the build of the parent of 64d3fac (ZombieBuddy 2.x, fewer patches). Correctness note: the Lua part (not part of this review) changes many game classes and global functions through the zdk mod and can affect other mods. Workshop ID 3677147974 checked on Steam."
