@@ -138,7 +138,7 @@ public final class Site {
                 font:15px/1.5 system-ui,-apple-system,"Segoe UI",sans-serif}
                 main{max-width:980px;margin:0 auto;padding:24px 16px 64px}
                 h1{font-size:28px;margin:0 0 4px}h2{font-size:19px;margin:0}h3{font-size:15px;margin:16px 0 6px}
-                p.lead{color:var(--muted);margin:0 0 20px}a{color:var(--info)}
+                p.lead{color:var(--muted);margin:0 0 8px}p.dl{margin:0 0 20px}a{color:var(--info)}
                 .bar{display:flex;gap:8px;flex-wrap:wrap;margin:0 0 20px}
                 input{flex:1;min-width:220px;padding:9px 12px;border:1px solid var(--line);border-radius:8px;
                 background:var(--card);color:var(--fg);font:inherit}
@@ -158,12 +158,21 @@ public final class Site {
                 <h1>BiteCheck Registry</h1>
                 <p class="lead">Java mods for Project Zomboid with public source code, reproducible or source-checked
                 builds and signed reviews. The BiteCheck launcher loads <b>verified</b> jars without a question and warns
-                about everything else. <a href="__REPO__/releases/latest">Download the launcher</a>
-                (Windows, macOS, Linux).</p>
+                about everything else.</p>
+                <p class="dl"><b>Download the launcher:</b>
+                <a href="__REPO__/releases/latest/download/BiteCheck-windows-x64.msi">Windows</a> ·
+                <a href="__REPO__/releases/latest/download/BiteCheck-macos-arm64.dmg">macOS (Apple Silicon)</a> ·
+                <a href="__REPO__/releases/latest/download/BiteCheck-macos-x64.dmg">macOS (Intel)</a> ·
+                <a href="__REPO__/releases/latest/download/BiteCheck-linux-x64.deb">Linux .deb</a> ·
+                <a href="__REPO__/releases/latest/download/BiteCheck-linux-x64.rpm">Linux .rpm</a> ·
+                <a href="__REPO__/releases/latest/download/BiteCheck.zip">portable zip</a>
+                (Steam Deck, any system) · <a href="__REPO__/releases/latest">all files and notes</a></p>
                 <div class="bar"><input id="q" type="search" placeholder="Search by name, author or SHA-256 of a jar"
                 aria-label="Search"></div>
                 """);
-        h.replace(h.indexOf("__REPO__"), h.indexOf("__REPO__") + "__REPO__".length(), esc(repoUrl));
+        for (int i = h.indexOf("__REPO__"); i >= 0; i = h.indexOf("__REPO__", i)) {
+            h.replace(i, i + "__REPO__".length(), esc(repoUrl));
+        }
         if (!keyChecked) {
             h.append("<p class=\"empty\">The registry key is not set up yet, so no jar is verified.</p>\n");
         }

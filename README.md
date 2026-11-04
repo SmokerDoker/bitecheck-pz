@@ -14,17 +14,17 @@ You need Project Zomboid (Build 42) and [ZombieBuddy](https://github.com/zed-0xf
 
    | System | Download | Note |
    | --- | --- | --- |
-   | Windows 10/11 | [BiteCheck-0.1.2-windows-x64.msi](https://github.com/SmokerDoker/bitecheck-pz/releases/download/v0.1.2/BiteCheck-0.1.2-windows-x64.msi) | installs for your user only, no admin rights; SmartScreen warns once (not code-signed yet): "More info" → "Run anyway" |
-   | macOS, Apple Silicon | [BiteCheck-0.1.2-macos-arm64.dmg](https://github.com/SmokerDoker/bitecheck-pz/releases/download/v0.1.2/BiteCheck-0.1.2-macos-arm64.dmg) | not notarized yet: open once via System Settings → Privacy & Security → "Open anyway" |
-   | macOS, Intel | [BiteCheck-0.1.2-macos-x64.dmg](https://github.com/SmokerDoker/bitecheck-pz/releases/download/v0.1.2/BiteCheck-0.1.2-macos-x64.dmg) | same |
-   | Linux (Debian/Ubuntu) | [BiteCheck-0.1.2-linux-x64.deb](https://github.com/SmokerDoker/bitecheck-pz/releases/download/v0.1.2/BiteCheck-0.1.2-linux-x64.deb) | installs to `/opt/bitecheck` |
-   | Linux (Fedora/openSUSE) | [BiteCheck-0.1.2-linux-x64.rpm](https://github.com/SmokerDoker/bitecheck-pz/releases/download/v0.1.2/BiteCheck-0.1.2-linux-x64.rpm) | |
-   | Any, incl. Steam Deck | [BiteCheck-0.1.2.zip](https://github.com/SmokerDoker/bitecheck-pz/releases/download/v0.1.2/BiteCheck-0.1.2.zip) | portable, uses Project Zomboid's own Java |
+   | Windows 10/11 | [BiteCheck-windows-x64.msi](https://github.com/SmokerDoker/bitecheck-pz/releases/latest/download/BiteCheck-windows-x64.msi) | installs for your user only, no admin rights; SmartScreen warns once (not code-signed yet): "More info" → "Run anyway" |
+   | macOS, Apple Silicon | [BiteCheck-macos-arm64.dmg](https://github.com/SmokerDoker/bitecheck-pz/releases/latest/download/BiteCheck-macos-arm64.dmg) | not notarized yet: open once via System Settings → Privacy & Security → "Open anyway" |
+   | macOS, Intel | [BiteCheck-macos-x64.dmg](https://github.com/SmokerDoker/bitecheck-pz/releases/latest/download/BiteCheck-macos-x64.dmg) | same |
+   | Linux (Debian/Ubuntu) | [BiteCheck-linux-x64.deb](https://github.com/SmokerDoker/bitecheck-pz/releases/latest/download/BiteCheck-linux-x64.deb) | installs to `/opt/bitecheck` |
+   | Linux (Fedora/openSUSE) | [BiteCheck-linux-x64.rpm](https://github.com/SmokerDoker/bitecheck-pz/releases/latest/download/BiteCheck-linux-x64.rpm) | |
+   | Any, incl. Steam Deck | [BiteCheck.zip](https://github.com/SmokerDoker/bitecheck-pz/releases/latest/download/BiteCheck.zip) | portable, uses Project Zomboid's own Java |
 
 2. Start BiteCheck. It checks your installed Java mods and starts Project Zomboid through Steam.
 3. Optional: press "Steam setup…" in BiteCheck to get a line for the game's launch options. Then every start from Steam is checked too.
 
-The installers bring their own small Java runtime. Every file is built by GitHub Actions from the tagged source ([`release.yml`](.github/workflows/release.yml)); [`SHA256SUMS.txt`](https://github.com/SmokerDoker/bitecheck-pz/releases/download/v0.1.2/SHA256SUMS.txt) lists their hashes.
+The installers bring their own small Java runtime. Every file is built by GitHub Actions from the tagged source ([`release.yml`](.github/workflows/release.yml)); [`SHA256SUMS.txt`](https://github.com/SmokerDoker/bitecheck-pz/releases/latest/download/SHA256SUMS.txt) lists their hashes.
 
 > BiteCheck is a community project. It is not affiliated with, endorsed by, or supported by The Indie Stone. "Project Zomboid" is a trademark of The Indie Stone.
 
