@@ -1,0 +1,8 @@
+mod = "real-reset"
+version = "2026.10.14"
+build_sha256 = "c77e43ec2c9f870d7d1cb18b71c642222ad6d99ba3839190c8f67580db55c005"
+reviewer = "smokerdoker"
+verdict = "approve"
+scope = "full"
+reviewed_at = "2026-11-04T15:38:06Z"
+notes = "Server-side admin tool. Moves world chunk files into a trash folder inside the world save and restores them; trashed chunks are permanently deleted after 7 days (configurable). All file access is confined to Saves/Multiplayer/<world> (canonical path check, regex-validated run ids, sanitized labels). Jar is byte-identical to the source at b024f8f. No network, process, native code or class loading. Note: the Java globals RealReset_* do not check the caller; the admin check (access level \"admin\" plus a recent dry run) is in the mod's server Lua only, so other server-side Lua mods can call them directly. Java still enforces a self-test, a 4-chunk radius around online players, skips loaded chunks and limits moves to 3000 per 10 minutes."
