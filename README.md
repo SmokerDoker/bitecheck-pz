@@ -15,10 +15,8 @@ You need Project Zomboid (Build 42) and [ZombieBuddy](https://github.com/zed-0xf
    | System | Download | Note |
    | --- | --- | --- |
    | Windows 10/11 | [BiteCheck-windows-x64.msi](https://github.com/SmokerDoker/bitecheck-pz/releases/latest/download/BiteCheck-windows-x64.msi) | installs for your user only, no admin rights; SmartScreen warns once (not code-signed yet): "More info" → "Run anyway" |
-   | macOS, Apple Silicon | [BiteCheck-macos-arm64.dmg](https://github.com/SmokerDoker/bitecheck-pz/releases/latest/download/BiteCheck-macos-arm64.dmg) | not notarized yet: open once via System Settings → Privacy & Security → "Open anyway" |
-   | macOS, Intel | [BiteCheck-macos-x64.dmg](https://github.com/SmokerDoker/bitecheck-pz/releases/latest/download/BiteCheck-macos-x64.dmg) | same |
-   | Linux (Debian/Ubuntu) | [BiteCheck-linux-x64.deb](https://github.com/SmokerDoker/bitecheck-pz/releases/latest/download/BiteCheck-linux-x64.deb) | installs to `/opt/bitecheck` |
-   | Linux (Fedora/openSUSE) | [BiteCheck-linux-x64.rpm](https://github.com/SmokerDoker/bitecheck-pz/releases/latest/download/BiteCheck-linux-x64.rpm) | |
+   | macOS | [Apple Silicon (M1 and newer)](https://github.com/SmokerDoker/bitecheck-pz/releases/latest/download/BiteCheck-macos-arm64.dmg) · [Intel](https://github.com/SmokerDoker/bitecheck-pz/releases/latest/download/BiteCheck-macos-x64.dmg) | not notarized yet: open once via System Settings → Privacy & Security → "Open anyway" |
+   | Linux | [Debian/Ubuntu (.deb)](https://github.com/SmokerDoker/bitecheck-pz/releases/latest/download/BiteCheck-linux-x64.deb) · [Fedora/openSUSE (.rpm)](https://github.com/SmokerDoker/bitecheck-pz/releases/latest/download/BiteCheck-linux-x64.rpm) | installs to `/opt/bitecheck` |
    | Any, incl. Steam Deck | [BiteCheck.zip](https://github.com/SmokerDoker/bitecheck-pz/releases/latest/download/BiteCheck.zip) | portable, uses Project Zomboid's own Java |
 
 2. Start BiteCheck. It checks your installed Java mods and starts Project Zomboid through Steam.
