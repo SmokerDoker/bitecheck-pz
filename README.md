@@ -1,6 +1,30 @@
 # BiteCheck
 
-**A verified Java mod launcher and curated mod registry for Project Zomboid.**
+**Safer Java mods for Project Zomboid.** BiteCheck checks every Java mod before the game loads it: mods whose source code was reviewed start without a question, everything else gets a warning first.
+
+**[Website and mod list](https://smokerdoker.github.io/bitecheck-pz/)** · **[Download](https://github.com/SmokerDoker/bitecheck-pz/releases/latest)** · **[Report a problem](https://github.com/SmokerDoker/bitecheck-pz/issues/new)**
+
+> **Public test.** BiteCheck works, but it is new. Please try it and tell us what breaks or confuses you: [open an issue](https://github.com/SmokerDoker/bitecheck-pz/issues/new) with your system, the BiteCheck version and what you saw.
+
+## Get started
+
+You need Project Zomboid (Build 42) and [ZombieBuddy](https://github.com/zed-0xff/ZombieBuddy), which loads Java mods.
+
+1. Download BiteCheck for your system:
+
+   | System | Download | Note |
+   | --- | --- | --- |
+   | Windows 10/11 | [BiteCheck-0.1.2-windows-x64.msi](https://github.com/SmokerDoker/bitecheck-pz/releases/download/v0.1.2/BiteCheck-0.1.2-windows-x64.msi) | installs for your user only, no admin rights; SmartScreen warns once (not code-signed yet): "More info" → "Run anyway" |
+   | macOS, Apple Silicon | [BiteCheck-0.1.2-macos-arm64.dmg](https://github.com/SmokerDoker/bitecheck-pz/releases/download/v0.1.2/BiteCheck-0.1.2-macos-arm64.dmg) | not notarized yet: open once via System Settings → Privacy & Security → "Open anyway" |
+   | macOS, Intel | [BiteCheck-0.1.2-macos-x64.dmg](https://github.com/SmokerDoker/bitecheck-pz/releases/download/v0.1.2/BiteCheck-0.1.2-macos-x64.dmg) | same |
+   | Linux (Debian/Ubuntu) | [BiteCheck-0.1.2-linux-x64.deb](https://github.com/SmokerDoker/bitecheck-pz/releases/download/v0.1.2/BiteCheck-0.1.2-linux-x64.deb) | installs to `/opt/bitecheck` |
+   | Linux (Fedora/openSUSE) | [BiteCheck-0.1.2-linux-x64.rpm](https://github.com/SmokerDoker/bitecheck-pz/releases/download/v0.1.2/BiteCheck-0.1.2-linux-x64.rpm) | |
+   | Any, incl. Steam Deck | [BiteCheck-0.1.2.zip](https://github.com/SmokerDoker/bitecheck-pz/releases/download/v0.1.2/BiteCheck-0.1.2.zip) | portable, uses Project Zomboid's own Java |
+
+2. Start BiteCheck. It checks your installed Java mods and starts Project Zomboid through Steam.
+3. Optional: press "Steam setup…" in BiteCheck to get a line for the game's launch options. Then every start from Steam is checked too.
+
+The installers bring their own small Java runtime. Every file is built by GitHub Actions from the tagged source ([`release.yml`](.github/workflows/release.yml)); [`SHA256SUMS.txt`](https://github.com/SmokerDoker/bitecheck-pz/releases/download/v0.1.2/SHA256SUMS.txt) lists their hashes.
 
 > BiteCheck is a community project. It is not affiliated with, endorsed by, or supported by The Indie Stone. "Project Zomboid" is a trademark of The Indie Stone.
 
@@ -29,21 +53,6 @@ BiteCheck works together with [ZombieBuddy](https://github.com/zed-0xff/ZombieBu
 
 Under the hood BiteCheck writes allow/deny decisions per jar hash into ZombieBuddy's `~/.zombie_buddy/mod_approvals.json` and never touches anything else. To check your mods every time you press Play in Steam, put BiteCheck into the game's launch options (the launcher's "Steam setup…" button shows the exact line, e.g. `"…\BiteCheck.bat" --wrap %command% -agentlib:zbNative --`). Without it, ZombieBuddy's own questions still protect you. Dedicated servers run BiteCheck the same way before the server starts, see [docs/SERVER.md](docs/SERVER.md). The launcher runs on Windows, macOS and Linux with the Java runtime that comes with Project Zomboid; no separate Java install is needed. It tells you when a newer version is released, but never downloads or installs anything itself.
 
-## Download
-
-Installers and the portable zip are on the [Releases page](https://github.com/SmokerDoker/bitecheck-pz/releases/latest):
-
-| System | File | Note |
-| --- | --- | --- |
-| Windows 10/11 | `BiteCheck-<version>-windows-x64.msi` | installs for your user only, no admin rights; SmartScreen warns once (not code-signed yet) |
-| macOS, Apple Silicon | `BiteCheck-<version>-macos-arm64.dmg` | not notarized yet: open once via System Settings → Privacy & Security → "Open anyway" |
-| macOS, Intel | `BiteCheck-<version>-macos-x64.dmg` | same |
-| Linux (Debian/Ubuntu) | `BiteCheck-<version>-linux-x64.deb` | installs to `/opt/bitecheck` |
-| Linux (Fedora/openSUSE) | `BiteCheck-<version>-linux-x64.rpm` | |
-| Any, incl. Steam Deck | `BiteCheck-<version>.zip` | portable, uses Project Zomboid's own Java |
-
-The installers bring their own small Java runtime. `SHA256SUMS.txt` on the release lists the hashes of all files; every build is made by GitHub Actions from the tagged commit (`release.yml`).
-
 ## How it works for modders
 
 Submitting a mod should be no harder than publishing to the Workshop:
@@ -58,7 +67,10 @@ Your mod is never blocked while it waits for review: players can load it as an u
 
 ## Status
 
-🚧 **Early development.** Not ready for players yet.
+**Public test.** The launcher, the registry and the review process work end to end; we are looking for players and mod authors to try them.
+
+<details>
+<summary>What is done</summary>
 
 - [x] Registry format and repository structure
 - [x] `bcz` CLI: keys, signatures, build records, reviews, verification, scanner, lint, index
@@ -70,7 +82,7 @@ Your mod is never blocked while it waits for review: players can load it as an u
 - [x] Installers for Windows, macOS and Linux built by GitHub Actions (`release.yml`)
 - [x] Start-up policy: one trusted review, publishers may review upstream mods (later two reviews, see `registry/policy.toml`)
 - [x] Eleven mods prepared as pending entries with preliminary reviews ([docs/reviews](docs/reviews/README.md))
-- [ ] First test with real players
+- [ ] First test with real players (running)
 - [x] Registry key set up ([docs/SETUP-REGISTRY.md](docs/SETUP-REGISTRY.md)); first verified mod: zb-hello-world
 - [x] `bcz login` / `bcz submit` (GitHub integration), [mod template](template/README.md), [Gradle plugin](gradle-plugin/README.md) and submit action
 - [x] CI rebuilds mods against the Project Zomboid dedicated server (only its `projectzomboid.jar`, fetched with DepotDownloader)
@@ -79,6 +91,8 @@ Your mod is never blocked while it waits for review: players can load it as an u
 - [x] Gradle plugin published to the Plugin Portal (`io.github.smokerdoker.bitecheck` 0.1.0)
 - [x] Submission tested end to end with the template: `bcz submit` by hand and the template's GitHub Action; CI's jar is identical to a local Windows build
 - [ ] Submission from a fork tested (an author without write access to the registry)
+
+</details>
 
 ## The `bcz` command line tool
 
