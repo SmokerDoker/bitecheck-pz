@@ -1,0 +1,8 @@
+mod = "z-better-workshop-upload"
+version = "2026.10.04"
+build_sha256 = "87137b3e7ecd777d3381ec188cc73f81df92633b707d58669c5a0a97191a1fb9"
+reviewer = "smokerdoker"
+verdict = "approve"
+scope = "full"
+reviewed_at = "2026-11-04T15:47:29Z"
+notes = "Client-side Workshop upload helper. Copies the item's workshop folder into a fresh, randomly named directory in the OS temp dir (outside ~/Zomboid, explained in the README), filters Contents by patterns and .workshopignore files (read up to the drive root, used only as patterns), uploads that copy and deletes only that directory; if no Steam callback arrives, the copy stays in temp. @include in the uploader's own description reads files inside the workshop folder (no \"..\", no absolute paths). One reflective read of SteamWorkshopItem.workshopFolder (constant name). No network, process, native code or class loading. ZBetterWorkshopUpload.jar matches the source at c7bd197. ZBetterWorkshopUpload-2x.jar was rebuilt from 9283898 (parent of 41ec5af) against ZombieBuddy v2.3.4 with JDK 25 (--release 17, -g): 11 of 17 classes byte-identical, the other 6 differ only in constant-pool order (different javac version); bytecode, line and local variable tables are identical."
