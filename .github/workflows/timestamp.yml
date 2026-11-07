@@ -7,6 +7,9 @@
 # main only, no required reviewer. It is weaker on purpose: it only vouches for an index that the
 # registry key signed, launchers ignore it for an index older than 45 days, and it cannot approve,
 # unblock or change any mod. Only trusted code from main runs here; no mod is built.
+# A timestamp is only issued while the index still matches main: if registry/ or keys/ changed
+# since the index's registry_commit (e.g. a new block waiting for the Registry run's approval), the
+# old index is not confirmed, so it goes stale after 7 days instead of hiding the change.
 name: Timestamp
 
 on:
@@ -33,6 +36,7 @@ jobs:
         with:
           ref: main
           path: tools
+          fetch-depth: 0
           persist-credentials: false
       - name: Check out the published index
         uses: actions/checkout@v7
@@ -60,6 +64,16 @@ jobs:
           cd index
           # only vouch for an index the registry key signed
           "$bcz" verify-sig index.toml --pub "$keys/registry.pub"
+          # ... and only while it is current: nothing in registry/ or keys/ changed on main since
+          commit="$(sed -n 's/^registry_commit = "\([0-9a-f]\{40\}\)"$/\1/p' index.toml)"
+          if [ -z "$commit" ] || ! git -C ../tools cat-file -e "$commit^{commit}" 2>/dev/null; then
+            echo "::warning::the index's registry_commit is not on main; no timestamp"
+            exit 0
+          fi
+          if ! git -C ../tools diff --quiet "$commit" HEAD -- registry keys; then
+            echo "::warning::registry/ or keys/ changed since the index was signed (${commit:0:12}); no timestamp until the Registry workflow publishes a new index"
+            exit 0
+          fi
           umask 077
           printf '%s\n' "$TIMESTAMP_KEY" > "$RUNNER_TEMP/timestamp.key"
           "$bcz" timestamp index.toml --out timestamp.toml
