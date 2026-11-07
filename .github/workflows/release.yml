@@ -50,7 +50,7 @@ jobs:
       matrix:
         include:
           - { os: windows-2022, type: msi, label: windows-x64 }
-          - { os: macos-14, type: dmg, label: macos-arm64 }
+          - { os: macos-15, type: dmg, label: macos-arm64 }
           - { os: macos-15-intel, type: dmg, label: macos-x64 }
           - { os: ubuntu-22.04, type: deb, label: linux-x64 }
           - { os: ubuntu-22.04, type: rpm, label: linux-x64 }
