@@ -176,6 +176,42 @@ public final class LauncherSelfTest {
             expect(status(s, "good.jar"), Verifier.Status.UNVERIFIED);
             expect(status(s, "evil.jar"), Verifier.Status.BLOCKED);
         });
+        run("timestamp: confirms an older index, so it still approves", () -> {
+            World w = World.create();
+            w.publishIndex(Instant.now().minus(10, ChronoUnit.DAYS), Map.of("verified", w.sha("good.jar")));
+            w.publishTimestamp(Instant.now().minus(1, ChronoUnit.HOURS), Hashing.sha256Hex(w.indexFile), w.timestamp);
+            Session s = w.session();
+            expect(status(s, "good.jar"), Verifier.Status.VERIFIED);
+            expect(s.index.stale(s.now), false);
+        });
+        run("timestamp: saved timestamp still confirms when offline", () -> {
+            World w = World.create();
+            w.publishIndex(Instant.now().minus(10, ChronoUnit.DAYS), Map.of("verified", w.sha("good.jar")));
+            w.publishTimestamp(Instant.now().minus(1, ChronoUnit.HOURS), Hashing.sha256Hex(w.indexFile), w.timestamp);
+            w.session();
+            Files.delete(w.indexFile); // offline
+            Session s = w.session();
+            expect(s.index.fromCache(), true);
+            expect(status(s, "good.jar"), Verifier.Status.VERIFIED);
+        });
+        run("timestamp: for another index, wrong key or too old an index it does not count", () -> {
+            World w = World.create();
+            w.publishIndex(Instant.now().minus(10, ChronoUnit.DAYS), Map.of("verified", w.sha("good.jar"),
+                    "blocked", w.sha("evil.jar")));
+            Instant recent = Instant.now().minus(1, ChronoUnit.HOURS);
+            w.publishTimestamp(recent, "ab".repeat(32), w.timestamp);
+            expect(status(w.session(), "good.jar"), Verifier.Status.UNVERIFIED);
+            w.publishTimestamp(recent, Hashing.sha256Hex(w.indexFile), w.registry); // not the timestamp key
+            Session wrongKey = w.session();
+            expect(status(wrongKey, "good.jar"), Verifier.Status.UNVERIFIED);
+            expect(wrongKey.notes.stream().anyMatch(n -> n.contains("Ignoring the index timestamp")), true);
+            expect(status(wrongKey, "evil.jar"), Verifier.Status.BLOCKED);
+
+            World old = World.create();
+            old.publishIndex(Instant.now().minus(50, ChronoUnit.DAYS), Map.of("verified", old.sha("good.jar")));
+            old.publishTimestamp(recent, Hashing.sha256Hex(old.indexFile), old.timestamp);
+            expect(status(old.session(), "good.jar"), Verifier.Status.UNVERIFIED);
+        });
         run("steam: reads Project Zomboid's launch options from localconfig.vdf", () -> {
             String vdf = """
                     "UserLocalConfigStore" { "Software" { "Valve" { "Steam" { "apps" {
@@ -376,6 +412,7 @@ public final class LauncherSelfTest {
         Path indexFile;
         Path modsDir;
         Keys.PrivateKeyInfo registry;
+        Keys.PrivateKeyInfo timestamp;
 
         static World create() throws Exception {
             World w = new World();
@@ -399,11 +436,16 @@ public final class LauncherSelfTest {
             w.registry = new Keys.PrivateKeyInfo(pair.getPrivate(), Keys.keyId(pair.getPublic()));
             Path pub = w.root.resolve("registry.pub");
             Files.writeString(pub, Keys.encodePublic(pair.getPublic(), "registry"));
+            KeyPair tsPair = Keys.generate();
+            w.timestamp = new Keys.PrivateKeyInfo(tsPair.getPrivate(), Keys.keyId(tsPair.getPublic()));
+            Path tsPub = w.root.resolve("timestamp.pub");
+            Files.writeString(tsPub, Keys.encodePublic(tsPair.getPublic(), "timestamp"));
             w.indexFile = w.root.resolve("published/index.toml");
             Files.createDirectories(w.indexFile.getParent());
             Files.writeString(w.biteCheck.resolve("config.toml"), ""
                     + "index_url = " + q(w.indexFile.toUri().toString()) + "\n"
                     + "registry_key = " + q(pub.toString()) + "\n"
+                    + "timestamp_key = " + q(tsPub.toString()) + "\n"
                     + "zomboid_dir = " + q(w.root.resolve("Zomboid").toString()) + "\n"
                     + "zombiebuddy_dir = " + q(w.zb.toString()) + "\n"
                     + "workshop_dir = " + q(workshop.toString()) + "\n"
@@ -455,6 +497,13 @@ public final class LauncherSelfTest {
             }
             Files.writeString(indexFile, text.toString());
             Signatures.sign(indexFile, registry);
+        }
+
+        /** Writes and signs timestamp.toml next to the published index. */
+        void publishTimestamp(Instant issuedAt, String indexSha256, Keys.PrivateKeyInfo key) throws Exception {
+            Path file = indexFile.resolveSibling("timestamp.toml");
+            Files.writeString(file, io.github.bitecheckpz.core.Timestamp.generate(indexSha256, issuedAt));
+            Signatures.sign(file, key);
         }
 
         Session session() throws IOException {

@@ -178,7 +178,7 @@ final class LauncherWindow {
         long flagged = count(s.rows, Verifier.Status.FLAGGED);
         long blocked = count(s.rows, Verifier.Status.BLOCKED);
         String indexText = s.index.index()
-                .map(i -> "registry index from " + i.generatedAt().toString().replace('T', ' ').replace("Z", " UTC"))
+                .map(i -> "registry index confirmed " + i.confirmedAt().toString().replace('T', ' ').replace("Z", " UTC"))
                 .orElse("registry index not available");
         summary.setText(s.mods.size() + " Java mod(s): " + verified + " verified, " + unverified + " unverified, "
                 + suspicious + " suspicious, " + flagged + " flagged, " + blocked + " blocked - " + indexText);

@@ -34,6 +34,7 @@ jobs:
           ./gradlew --no-daemon check :launcher:launcherZip :launcher:fatJar :cli:distZip \
             -PbitecheckVersion="${{ steps.version.outputs.version }}"
           test -f keys/registry.pub || echo "::warning::keys/registry.pub is missing: this launcher cannot verify any mod"
+          test -f keys/timestamp.pub || echo "::warning::keys/timestamp.pub is missing: this launcher needs an index signed within the last 7 days"
       - uses: actions/upload-artifact@v7
         with:
           name: portable

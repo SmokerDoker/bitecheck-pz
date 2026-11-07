@@ -142,6 +142,28 @@ public final class SelfTest {
             expect(index.lookup("cd".repeat(32)).status(), Verifier.Status.UNVERIFIED);
             expect(index.isStale(java.time.Instant.parse("2026-11-05T10:00:00Z")), false);
             expect(index.isStale(java.time.Instant.parse("2026-11-09T10:00:00Z")), true);
+            Index confirmed = index.confirmedAt(java.time.Instant.parse("2026-11-20T10:00:00Z"));
+            expect(confirmed.isStale(java.time.Instant.parse("2026-11-25T10:00:00Z")), false);
+            expect(confirmed.isStale(java.time.Instant.parse("2026-11-28T10:00:00Z")), true);
+            // an older confirmation changes nothing
+            expect(confirmed.confirmedAt(java.time.Instant.parse("2026-11-10T10:00:00Z")).confirmedAt(),
+                    confirmed.confirmedAt());
+            // no confirmation keeps it fresh longer than MAX_CONFIRMED_AGE after it was generated
+            Index late = index.confirmedAt(java.time.Instant.parse("2027-03-01T10:00:00Z"));
+            expect(late.isStale(java.time.Instant.parse("2026-12-15T09:00:00Z")), false);
+            expect(late.isStale(java.time.Instant.parse("2026-12-16T11:00:00Z")), true);
+        });
+        run("timestamp: round trips and rejects bad input", () -> {
+            Path file = Files.createTempFile("bcz-ts", ".toml");
+            String sha = "ab".repeat(32);
+            Files.writeString(file, Timestamp.generate(sha, java.time.Instant.parse("2026-11-07T03:17:42.5Z")));
+            Timestamp ts = Timestamp.parse(file);
+            expect(ts.indexSha256(), sha);
+            expect(ts.issuedAt(), java.time.Instant.parse("2026-11-07T03:17:42Z"));
+            Files.writeString(file, "format = 1\nindex_sha256 = \"nope\"\nissued_at = \"2026-11-07T03:17:42Z\"\n");
+            expectThrows(() -> Timestamp.parse(file));
+            Files.writeString(file, "format = 2\nindex_sha256 = \"" + sha + "\"\nissued_at = \"2026-11-07T03:17:42Z\"\n");
+            expectThrows(() -> Timestamp.parse(file));
         });
         run("index: flagged release is listed as flagged", () -> {
             Fixture f = Fixture.create();
@@ -737,6 +759,15 @@ public final class SelfTest {
         if (!expected.equals(actual)) {
             throw new AssertionError("expected " + expected + " but got " + actual);
         }
+    }
+
+    private static void expectThrows(Body body) {
+        try {
+            body.run();
+        } catch (Exception expected) {
+            return;
+        }
+        throw new AssertionError("expected an exception");
     }
 
     private static void deleteTree(Path dir) throws IOException {

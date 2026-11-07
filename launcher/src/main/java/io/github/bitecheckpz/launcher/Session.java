@@ -51,14 +51,15 @@ public final class Session {
         Optional<Keys.PublicKeyInfo> key = IndexClient.registryKey(config);
         URI url = config.url("index_url").orElse(URI.create(IndexClient.DEFAULT_URL));
         Instant now = Instant.now();
-        IndexClient.Outcome index = new IndexClient(url, key, biteCheckDir.resolve("cache"), state).fetch(now);
+        IndexClient.Outcome index = new IndexClient(url, key, IndexClient.timestampKey(config),
+                biteCheckDir.resolve("cache"), state).fetch(now);
         Optional<Index> usable = index.index();
         List<Planner.Row> rows = Planner.plan(mods, usable, now, approvals, state);
         Session session = new Session(platform, config, state, approvals, mods, index, rows, now);
         session.notes.addAll(index.notes());
         if (index.stale(now)) {
-            session.notes.add("The registry index is older than " + Index.MAX_AGE.toDays()
-                    + " days. Verified mods are treated as unverified until it is updated.");
+            session.notes.add("The registry index was last confirmed more than " + Index.MAX_AGE.toDays()
+                    + " days ago. Verified mods are treated as unverified until it is updated.");
         }
         if (platform.workshopContentDirs().isEmpty() && platform.steamRoots().isEmpty()) {
             session.notes.add("Steam was not found. Set steam_dir in " + biteCheckDir.resolve("config.toml") + ".");

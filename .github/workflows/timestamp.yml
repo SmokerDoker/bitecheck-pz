@@ -1,0 +1,80 @@
+# Daily: confirms that the published index is still current by signing a small timestamp.toml next
+# to it on the "index" branch. Launchers then keep trusting an index for up to 45 days
+# (Index.MAX_CONFIRMED_AGE), so the index itself only has to be signed again with the registry key
+# (which waits for a maintainer's approval) when the registry changes, or once a month.
+#
+# The timestamp key (BITECHECK_TIMESTAMP_KEY) is a secret in the "registry-timestamp" environment:
+# main only, no required reviewer. It is weaker on purpose: it only vouches for an index that the
+# registry key signed, launchers ignore it for an index older than 45 days, and it cannot approve,
+# unblock or change any mod. Only trusted code from main runs here; no mod is built.
+name: Timestamp
+
+on:
+  schedule:
+    - cron: "47 4 * * *"
+  workflow_dispatch:
+
+concurrency:
+  group: index-timestamp
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  timestamp:
+    runs-on: ubuntu-latest
+    environment: registry-timestamp
+    permissions:
+      contents: write
+    steps:
+      - name: Check out the bcz tool and the keys
+        uses: actions/checkout@v7
+        with:
+          ref: main
+          path: tools
+          persist-credentials: false
+      - name: Check out the published index
+        uses: actions/checkout@v7
+        with:
+          ref: index
+          path: index
+          fetch-depth: 2
+      - uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: "21"
+      - name: Build bcz
+        run: bash tools/.github/scripts/build-bcz.sh tools
+      - name: Sign and publish the timestamp
+        env:
+          TIMESTAMP_KEY: ${{ secrets.BITECHECK_TIMESTAMP_KEY }}
+        run: |
+          set -euo pipefail
+          if [ -z "$TIMESTAMP_KEY" ] || [ ! -f tools/keys/timestamp.pub ]; then
+            echo "::warning::timestamp key not set up; no timestamp published"
+            exit 0
+          fi
+          bcz="$PWD/tools/cli/build/install/bcz/bin/bcz"
+          keys="$PWD/tools/keys"
+          cd index
+          # only vouch for an index the registry key signed
+          "$bcz" verify-sig index.toml --pub "$keys/registry.pub"
+          umask 077
+          printf '%s\n' "$TIMESTAMP_KEY" > "$RUNNER_TEMP/timestamp.key"
+          "$bcz" timestamp index.toml --out timestamp.toml
+          "$bcz" sign timestamp.toml --key "$RUNNER_TEMP/timestamp.key"
+          rm -f "$RUNNER_TEMP/timestamp.key"
+          "$bcz" verify-sig timestamp.toml --pub "$keys/timestamp.pub"
+          git config user.name "BiteCheck Registry"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          head="$(git rev-parse HEAD)"
+          # keep the branch short: the index commit plus only the newest timestamp commit
+          case "$(git log -1 --format=%s)" in
+            Timestamp*) git reset -q --soft HEAD~1 ;;
+          esac
+          git add timestamp.toml timestamp.toml.sig
+          git commit -q -m "Timestamp $(date -u +%Y-%m-%dT%H:%M:%SZ)"
+          # fails (harmlessly) if the Registry workflow published a new index meanwhile
+          git push -q --force-with-lease="index:$head" origin HEAD:index
+          echo "Timestamp for index $(sha256sum index.toml | cut -c1-12)… published" >> "$GITHUB_STEP_SUMMARY"

@@ -9,6 +9,7 @@ import io.github.bitecheckpz.core.Records;
 import io.github.bitecheckpz.core.Registry;
 import io.github.bitecheckpz.core.Signatures;
 import io.github.bitecheckpz.core.Site;
+import io.github.bitecheckpz.core.Timestamp;
 import io.github.bitecheckpz.core.Toml;
 import io.github.bitecheckpz.core.Verifier;
 
@@ -103,6 +104,9 @@ public final class Main {
                   Print source, commit and build settings of a release as name=value lines (for CI).
               bcz index [--registry <dir>] --registry-key <public-key> --out <file> [--commit <sha>]
                   Generate the launcher index from the registry (sign it afterwards).
+              bcz timestamp <index.toml> --out <file>
+                  Write a timestamp confirming that this index is still current (sign it afterwards
+                  with the timestamp key).
               bcz site [--registry <dir>] [--registry-key <public-key>] --out <dir> [--repo-url <url>]
                   Generate the registry website (index.html) from the registry files.
 
@@ -141,6 +145,7 @@ public final class Main {
                 case "scan" -> scan(parsed, out);
                 case "lint" -> lint(parsed, out);
                 case "index" -> index(parsed, out);
+                case "timestamp" -> timestamp(parsed, out);
                 case "release-info" -> releaseInfo(parsed, out);
                 case "source-check" -> sourceCheck(parsed, out);
                 case "jar-compare" -> jarCompare(parsed, out);
@@ -332,6 +337,15 @@ public final class Main {
         long verified = parsed.entries().values().stream()
                 .filter(e -> e.status() == Verifier.Status.VERIFIED).count();
         out.println("Wrote " + target + ": " + parsed.entries().size() + " entries, " + verified + " verified");
+        return OK;
+    }
+
+    private static int timestamp(Args a, PrintStream out) throws IOException, Toml.TomlException, UsageException {
+        Path index = Path.of(a.positional(0, "index.toml"));
+        Index.parse(index); // only for a real index
+        Path target = Path.of(a.requiredOption("out"));
+        Files.writeString(target, Timestamp.generate(Hashing.sha256Hex(index), Instant.now()), StandardCharsets.UTF_8);
+        out.println("Wrote " + target);
         return OK;
     }
 

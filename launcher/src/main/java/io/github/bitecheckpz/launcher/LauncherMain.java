@@ -274,7 +274,9 @@ public final class LauncherMain {
         out.println("Mods:        " + session.mods.size() + " Java mod(s) found");
         out.println("ZombieBuddy: " + session.approvals.file());
         session.index.index().ifPresentOrElse(
-                i -> out.println("Index:       " + i.generatedAt() + (session.index.fromCache() ? " (saved copy)" : "")
+                i -> out.println("Index:       " + i.generatedAt()
+                        + (i.confirmedAt().equals(i.generatedAt()) ? "" : ", confirmed " + i.confirmedAt())
+                        + (session.index.fromCache() ? " (saved copy)" : "")
                         + ", " + i.entries().size() + " entries"),
                 () -> out.println("Index:       not available"));
         session.notes.forEach(n -> out.println("note: " + n));

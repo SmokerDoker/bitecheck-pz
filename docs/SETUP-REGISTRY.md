@@ -32,10 +32,25 @@ git push
 From now on:
 
 - every launcher build pins this key (it is copied into `BiteCheck.jar`),
-- the `Registry` workflow signs build records and publishes the signed index to the `index` branch daily and after every merge,
+- the `Registry` workflow signs build records and publishes the signed index to the `index` branch after every merge and monthly,
 - `validate-registry.yml` checks build record signatures on pull requests.
 
-## 4. Trust levels
+## 4. The timestamp key
+
+Launchers distrust an index that is older than 7 days. So that the registry key (and your approval) is not needed every day, a second, weaker key signs `timestamp.toml` daily: it confirms that the index with a given hash is still current. Launchers accept that for at most 45 days after the index was signed; the `Registry` workflow signs a new index monthly. The timestamp key cannot approve or unblock any mod.
+
+```sh
+cd keys
+../cli/build/install/bcz/bin/bcz keygen timestamp
+```
+
+1. **Settings → Environments → New environment** `registry-timestamp`, deployment branches: only `main`, **no** required reviewer.
+2. Add the secret `BITECHECK_TIMESTAMP_KEY` there (all three lines of `~/.bitecheck/keys/timestamp.key`).
+3. Commit `keys/timestamp.pub` and release a new launcher, since launchers pin it.
+
+The `Timestamp` workflow (`timestamp.yml`) then runs daily. If the key leaks: create a new one, replace the secret and release a launcher; until then the worst case is that launchers keep the current index for up to 45 days instead of a newer one.
+
+## 5. Trust levels
 
 Reviewers are added with a public key in `keys/reviewers/<name>.pub` and an entry in `keys/trust.toml`:
 
