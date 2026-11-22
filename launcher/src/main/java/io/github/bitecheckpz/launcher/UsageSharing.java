@@ -36,8 +36,8 @@ import java.util.regex.Pattern;
  * Jumpstart cloud Worker at {@link #DEFAULT_URL} unless config.toml sets {@code cloud_url}.
  */
 public final class UsageSharing {
-    /** The Jumpstart cloud Worker (see jumpstart-pz/cloud); empty until it is deployed. */
-    public static final String DEFAULT_URL = "";
+    /** The Jumpstart cloud Worker (jumpstart-pz/cloud). */
+    public static final String DEFAULT_URL = "https://jumpstart-cloud.smokerdoker.workers.dev";
     static final String FORMAT = "jumpstart-usage 1";
     static final int MAX_JARS = 100;
     private static final Pattern WORKSHOP_ID = Pattern.compile("[/\\\\]content[/\\\\]108600[/\\\\]([0-9]{1,20})[/\\\\]");
