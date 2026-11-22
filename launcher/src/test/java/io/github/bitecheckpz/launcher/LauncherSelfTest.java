@@ -70,6 +70,45 @@ public final class LauncherSelfTest {
             expect(UpdateCheck.isNewer("0.2.0", "0.2.0-rc1"), false);
             expect(UpdateCheck.note(Config.empty()), Optional.empty()); // test classes have no version: no request
         });
+        run("usage sharing: off by default, sends nothing", () -> {
+            Path dir = Files.createTempDirectory("bc-usage");
+            UsageSharing sharing = UsageSharing.load(dir);
+            expect(sharing.enabled(), false);
+            List<String> sent = new ArrayList<>();
+            String r = sharing.sendIfDue(java.net.URI.create("https://example.invalid"), "test/1",
+                    List.of(new UsageSharing.Jar("ab".repeat(32), "123", "Mod", 10)), java.time.LocalDate.of(2026, 11, 22),
+                    (url, body) -> { sent.add(body); return "OK"; });
+            expect(r, "sharing is off");
+            expect(sent.size(), 0);
+        });
+        run("usage sharing: once a day, monthly new id, only hash, workshop id, mod id, size", () -> {
+            Path dir = Files.createTempDirectory("bc-usage");
+            UsageSharing sharing = UsageSharing.load(dir);
+            sharing.setEnabled(true);
+            List<String> sent = new ArrayList<>();
+            UsageSharing.Sender sender = (url, body) -> { sent.add(body); return "OK 1 jars"; };
+            java.net.URI url = java.net.URI.create("https://example.invalid");
+            List<UsageSharing.Jar> jars = List.of(new UsageSharing.Jar("ab".repeat(32), "123", "My\tMod", 4096));
+            expect(sharing.sendIfDue(url, "test/1", jars, java.time.LocalDate.of(2026, 11, 22), sender), "OK 1 jars");
+            expect(UsageSharing.load(dir).sendIfDue(url, "test/1", jars, java.time.LocalDate.of(2026, 11, 22), sender), "already reported today");
+            UsageSharing.load(dir).sendIfDue(url, "test/1", jars, java.time.LocalDate.of(2026, 11, 23), sender);
+            UsageSharing.load(dir).sendIfDue(url, "test/1", jars, java.time.LocalDate.of(2026, 12, 1), sender);
+            expect(sent.size(), 3);
+            String[] lines = sent.get(0).split("\n");
+            expect(lines[0], "jumpstart-usage 1");
+            expect(lines[3], "jar\t" + "ab".repeat(32) + "\t123\tMy Mod\t4096");
+            expect(lines.length, 4);
+            String id1 = sent.get(0).split("\n")[1];
+            expect(sent.get(1).split("\n")[1], id1); // same month, same id
+            expect(sent.get(2).split("\n")[1].equals(id1), false); // new month, new id
+        });
+        run("usage sharing: workshop id from the jar's path, preview without an id", () -> {
+            expect(UsageSharing.Jar.workshopIdOf(Path.of("C:/Steam/steamapps/workshop/content/108600/3684713089/mods/X/42/a.jar")), "3684713089");
+            expect(UsageSharing.Jar.workshopIdOf(Path.of("/home/u/Zomboid/mods/X/42/a.jar")), null);
+            String preview = UsageSharing.preview("test/1", List.of(new UsageSharing.Jar("ab".repeat(32), null, "Local", 1)));
+            expect(preview.contains("install\t<random id, new every month>"), true);
+            expect(preview.contains("jar\t" + "ab".repeat(32) + "\t\tLocal\t1"), true);
+        });
         run("flow: verified allowed, unverified untouched, blocked denied", () -> {
             World w = World.create();
             Session s = w.session();
