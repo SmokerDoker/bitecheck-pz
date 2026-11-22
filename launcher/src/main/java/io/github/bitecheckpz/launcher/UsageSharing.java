@@ -32,8 +32,8 @@ import java.util.regex.Pattern;
  * a random installation id, so the server can count each installation once; the id changes every
  * month, and the server stores only a salted hash of it. At most one report per day.
  *
- * <p>The player's choice and the id live in {@code ~/.bitecheck/usage.toml}; the server address
- * is {@link #DEFAULT_URL} unless config.toml sets {@code usage_url}.
+ * <p>The player's choice and the id live in {@code ~/.bitecheck/usage.toml}; the server is the
+ * Jumpstart cloud Worker at {@link #DEFAULT_URL} unless config.toml sets {@code cloud_url}.
  */
 public final class UsageSharing {
     /** The Jumpstart cloud Worker (see jumpstart-pz/cloud); empty until it is deployed. */
@@ -106,9 +106,9 @@ public final class UsageSharing {
         save();
     }
 
-    /** Where reports go: config.toml's usage_url, else {@link #DEFAULT_URL}; empty if neither is set. */
+    /** The Jumpstart cloud: config.toml's cloud_url, else {@link #DEFAULT_URL}; empty if neither is set. */
     public static Optional<URI> url(Config config) {
-        Optional<URI> configured = config.url("usage_url");
+        Optional<URI> configured = config.url("cloud_url");
         if (configured.isPresent()) {
             return configured;
         }
