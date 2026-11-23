@@ -69,7 +69,7 @@ public final class SteamSetup {
     public static String launchOptions(Platform.Os os, Path script, Optional<String> current) {
         String prefix = quote(script.toString()) + " " + WRAP + " ";
         String existing = current.map(String::strip).orElse("");
-        if (existing.contains(WRAP)) {
+        if (hasOwnWrapper(existing)) {
             return existing; // already set up
         }
         if (existing.isEmpty()) {
@@ -82,9 +82,21 @@ public final class SteamSetup {
         return prefix + "%command% " + existing;
     }
 
+    /**
+     * BiteCheck's own wrapper: a quoted BiteCheck program or script followed by --wrap. Other tools
+     * wrap the game the same way (Jumpstart: {@code "…/Jumpstart" --wrap %command%}); their --wrap
+     * does not mean BiteCheck is set up, and BiteCheck then goes directly in front of %command%.
+     */
+    private static final Pattern OWN_WRAPPER = Pattern.compile(
+            "\"(?:[^\"]*[/\\\\])?[^\"/\\\\]*[Bb]ite[Cc]heck[^\"/\\\\]*\"\\s+" + Pattern.quote(WRAP) + "(?:\\s|$)");
+
+    static boolean hasOwnWrapper(String options) {
+        return OWN_WRAPPER.matcher(options).find();
+    }
+
     /** True if the launch options already start BiteCheck. */
     public static boolean isSetUp(Optional<String> current) {
-        return current.map(s -> s.contains(WRAP) && s.contains("%command%")).orElse(false);
+        return current.map(s -> hasOwnWrapper(s) && s.contains("%command%")).orElse(false);
     }
 
     /** Project Zomboid's launch options from Steam's localconfig.vdf files (one per Steam account). */
