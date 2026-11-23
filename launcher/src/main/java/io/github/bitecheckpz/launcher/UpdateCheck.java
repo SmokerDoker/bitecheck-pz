@@ -9,8 +9,9 @@ import java.util.regex.Pattern;
 
 /**
  * Tells the player when a newer launcher is released. It only reads the version from where
- * GitHub's "latest release" page redirects to; nothing is downloaded or installed, and the link
- * shown is always the fixed releases page. Turned off with {@code update_check = "off"}.
+ * GitHub's "latest release" page redirects to; the link shown is always the fixed releases page.
+ * Installing is {@link SelfUpdate}'s job and only happens when the player asks for it.
+ * Turned off with {@code update_check = "off"}.
  */
 public final class UpdateCheck {
 
@@ -22,18 +23,33 @@ public final class UpdateCheck {
     private UpdateCheck() {
     }
 
-    /** A note for the player if a newer release exists; empty if not, if offline or for a dev build. */
-    public static Optional<String> note(Config config) {
+    /** This launcher's version; empty for a dev build. */
+    public static Optional<String> current() {
         String current = UpdateCheck.class.getPackage().getImplementationVersion();
-        if (current == null || current.endsWith("-SNAPSHOT") || "off".equals(config.string("update_check").orElse(""))) {
+        return current == null || current.endsWith("-SNAPSHOT") ? Optional.empty() : Optional.of(current);
+    }
+
+    /** The latest release's version if it is newer; empty if not, if offline, turned off or a dev build. */
+    public static Optional<String> newerVersion(Config config) {
+        Optional<String> current = current();
+        if (current.isEmpty() || "off".equals(config.string("update_check").orElse(""))) {
             return Optional.empty();
         }
         try {
-            return latest().filter(v -> isNewer(v, current))
-                    .map(v -> "BiteCheck " + v + " is available (you have " + current + "): " + RELEASES_URL);
+            return latest().filter(v -> isNewer(v, current.get()));
         } catch (IOException | RuntimeException e) {
             return Optional.empty(); // no update hint is no reason to bother the player
         }
+    }
+
+    /** The note for the player about a newer release. */
+    public static String note(String newer) {
+        return "BiteCheck " + newer + " is available (you have " + current().orElse("?") + "): " + RELEASES_URL;
+    }
+
+    /** A note for the player if a newer release exists; empty if not, if offline or for a dev build. */
+    public static Optional<String> note(Config config) {
+        return newerVersion(config).map(UpdateCheck::note);
     }
 
     private static Optional<String> latest() throws IOException {

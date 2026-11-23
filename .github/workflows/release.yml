@@ -35,6 +35,7 @@ jobs:
             -PbitecheckVersion="${{ steps.version.outputs.version }}"
           test -f keys/registry.pub || echo "::warning::keys/registry.pub is missing: this launcher cannot verify any mod"
           test -f keys/timestamp.pub || echo "::warning::keys/timestamp.pub is missing: this launcher needs an index signed within the last 7 days"
+          test -f keys/release.pub || echo "::warning::keys/release.pub is missing: this launcher cannot update itself"
       - uses: actions/upload-artifact@v7
         with:
           name: portable
@@ -102,9 +103,16 @@ jobs:
     if: startsWith(github.ref, 'refs/tags/v')
     needs: [build, installers]
     runs-on: ubuntu-latest
+    # The release key (BITECHECK_RELEASE_KEY) signs SHA256SUMS.txt; launchers only install an update
+    # whose checksums carry that signature. See docs/SETUP-REGISTRY.md, "The release key".
+    environment: release-signing
     permissions:
       contents: write
     steps:
+      - uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: "21"
       - uses: actions/download-artifact@v8
         with:
           path: artifacts
@@ -117,6 +125,19 @@ jobs:
           v="${{ needs.build.outputs.version }}"
           for f in dist/*-"$v"*; do cp "$f" "${f/-$v/}"; done
           cd dist && sha256sum * > SHA256SUMS.txt && cat SHA256SUMS.txt
+      - name: Sign the checksums
+        env:
+          RELEASE_KEY: ${{ secrets.BITECHECK_RELEASE_KEY }}
+        run: |
+          if [ -z "$RELEASE_KEY" ]; then
+            echo "::warning::BITECHECK_RELEASE_KEY is not set; launchers will not install this release as an update"
+            exit 0
+          fi
+          unzip -q "$(find artifacts -name 'bcz-*.zip' | head -n 1)" -d "$RUNNER_TEMP/bcz"
+          bcz="$(find "$RUNNER_TEMP/bcz" -path '*/bin/bcz' | head -n 1)"
+          printf '%s\n' "$RELEASE_KEY" > "$RUNNER_TEMP/release.key"
+          "$bcz" sign dist/SHA256SUMS.txt --key "$RUNNER_TEMP/release.key"
+          rm -f "$RUNNER_TEMP/release.key"
       - name: Publish
         env:
           GH_TOKEN: ${{ github.token }}

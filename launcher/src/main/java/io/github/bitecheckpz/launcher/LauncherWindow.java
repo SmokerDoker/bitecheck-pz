@@ -50,7 +50,9 @@ final class LauncherWindow {
     private final JButton applyOnly = new JButton("Apply only");
     private final JButton start = new JButton("Start Project Zomboid");
     private final JButton steamSetup = new JButton("Steam setup…");
+    private final JButton update = new JButton("Update BiteCheck…");
     private Session session;
+    private SelfUpdate.Offer offer;
 
     private LauncherWindow(Path dir) {
         this.dir = dir;
@@ -119,6 +121,8 @@ final class LauncherWindow {
         content.add(center, BorderLayout.CENTER);
 
         JPanel buttons = new JPanel(new FlowLayout(FlowLayout.RIGHT, 8, 0));
+        update.setVisible(false);
+        buttons.add(update);
         buttons.add(steamSetup);
         buttons.add(allowFlagged);
         buttons.add(refresh);
@@ -132,6 +136,7 @@ final class LauncherWindow {
         applyOnly.addActionListener(e -> apply(false));
         start.addActionListener(e -> apply(true));
         steamSetup.addActionListener(e -> showSteamSetup());
+        update.addActionListener(e -> installUpdate());
 
         frame.setContentPane(content);
         frame.pack();
@@ -208,6 +213,69 @@ final class LauncherWindow {
         }
         notes.setText(text.toString().strip());
         notes.setCaretPosition(0);
+        offer = s.newerVersion.flatMap(v -> SelfUpdate.offer(v, s.config)).orElse(null);
+        update.setVisible(offer != null);
+        if (offer != null) {
+            update.setText("Update to " + offer.version() + "…");
+        }
+    }
+
+    /** Downloads the newer release, checks its signature and installs it (see {@link SelfUpdate}). */
+    private void installUpdate() {
+        SelfUpdate.Offer o = offer;
+        if (o == null) {
+            return;
+        }
+        int ok = JOptionPane.showConfirmDialog(frame,
+                "<html>BiteCheck " + escape(o.version()) + " will be downloaded from GitHub and checked against the<br>"
+                        + "BiteCheck release signature. It is only installed if the check passes.<br><br>"
+                        + (o.os() == Platform.Os.LINUX
+                                ? "On Linux the package needs your password, so BiteCheck shows the command to install it."
+                                : "BiteCheck closes, installs the update and starts again.")
+                        + "</html>",
+                "Update BiteCheck", JOptionPane.OK_CANCEL_OPTION, JOptionPane.INFORMATION_MESSAGE);
+        if (ok != JOptionPane.OK_OPTION) {
+            return;
+        }
+        setBusy(true);
+        update.setEnabled(false);
+        summary.setText("Downloading BiteCheck " + o.version() + "…");
+        Config config = session != null ? session.config : Config.empty();
+        new SwingWorker<SelfUpdate.Result, Void>() {
+            @Override
+            protected SelfUpdate.Result doInBackground() throws Exception {
+                var key = IndexClient.releaseKey(config).orElseThrow(() -> new java.io.IOException("No release key is built in."));
+                Path installer = SelfUpdate.download(o, dir.resolve("updates"), key);
+                return SelfUpdate.install(o, installer);
+            }
+
+            @Override
+            protected void done() {
+                try {
+                    SelfUpdate.Result result = get();
+                    if (result.exitNow()) {
+                        frame.dispose();
+                        System.exit(0);
+                    }
+                    JTextArea text = new JTextArea(result.message(), 8, 70);
+                    text.setEditable(false);
+                    text.setLineWrap(true);
+                    JOptionPane.showMessageDialog(frame, new JScrollPane(text), "Update BiteCheck",
+                            JOptionPane.INFORMATION_MESSAGE);
+                } catch (InterruptedException e) {
+                    Thread.currentThread().interrupt();
+                } catch (ExecutionException e) {
+                    JOptionPane.showMessageDialog(frame, "The update failed: " + e.getCause().getMessage()
+                            + "\n\nYou can download it yourself: " + UpdateCheck.RELEASES_URL,
+                            "Update BiteCheck", JOptionPane.ERROR_MESSAGE);
+                }
+                update.setEnabled(true);
+                setBusy(false);
+                if (session != null) {
+                    show(session);
+                }
+            }
+        }.execute();
     }
 
     private static long count(List<Planner.Row> rows, Verifier.Status status) {
