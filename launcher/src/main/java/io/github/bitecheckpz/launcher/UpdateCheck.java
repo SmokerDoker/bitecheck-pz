@@ -10,8 +10,7 @@ import java.util.regex.Pattern;
 /**
  * Tells the player when a newer launcher is released. It only reads the version from where
  * GitHub's "latest release" page redirects to; the link shown is always the fixed releases page.
- * Installing is {@link SelfUpdate}'s job and only happens when the player asks for it.
- * Turned off with {@code update_check = "off"}.
+ * Installing is {@link SelfUpdate}'s job. Turned off (hint and updates) with {@code update_check = "off"}.
  */
 public final class UpdateCheck {
 

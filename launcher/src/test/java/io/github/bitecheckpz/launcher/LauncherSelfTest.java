@@ -80,9 +80,23 @@ public final class LauncherSelfTest {
             expect(SelfUpdate.macBundle("/Applications/BiteCheck.app/Contents/MacOS/BiteCheck").map(Path::toString)
                     .map(p -> p.replace('\\', '/').endsWith("/Applications/BiteCheck.app")), Optional.of(true));
             expect(SelfUpdate.macBundle("/opt/bitecheck/bin/BiteCheck"), Optional.empty());
-            String script = SelfUpdate.windowsScript("42", "C:\\Users\\A B\\100%\\x.msi", "C:\\BiteCheck\\BiteCheck.exe");
-            expect(script.contains("msiexec /i \"C:\\Users\\A B\\100%%\\x.msi\" /passive"), true);
+            String script = SelfUpdate.windowsScript("42", "C:\\Users\\A B\\100%\\x.msi", "C:\\BiteCheck\\BiteCheck.exe", true);
+            expect(script.contains("msiexec /i \"C:\\Users\\A B\\100%%\\x.msi\" /quiet"), true);
             expect(script.contains("PID eq 42"), true);
+            expect(script.contains("start \"\" \"C:\\BiteCheck\\BiteCheck.exe\""), true);
+            expect(SelfUpdate.windowsScript("42", "x.msi", "a.exe", false).contains("start \"\""), false);
+        });
+        run("self update: installs on its own at most once a day per version", () -> {
+            Path dir = Files.createTempDirectory("bc-update");
+            Instant now = Instant.now();
+            expect(SelfUpdate.autoAllowed(Config.empty(), dir, "0.1.5", now), true);
+            Files.writeString(dir.resolve("attempt-0.1.5"), "");
+            expect(SelfUpdate.autoAllowed(Config.empty(), dir, "0.1.5", now), false);
+            expect(SelfUpdate.autoAllowed(Config.empty(), dir, "0.1.5", now.plus(java.time.Duration.ofDays(2))), true);
+            expect(SelfUpdate.autoAllowed(Config.empty(), dir, "0.1.6", now), true);
+            Path cfg = dir.resolve("config.toml");
+            Files.writeString(cfg, "auto_update = \"off\"\n");
+            expect(SelfUpdate.autoAllowed(Config.load(cfg), dir, "0.1.6", now), false);
         });
         run("self update: installs only a signed, listed and matching installer", () -> {
             Path dir = Files.createTempDirectory("bc-update");

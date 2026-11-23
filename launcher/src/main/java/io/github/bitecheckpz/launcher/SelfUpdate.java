@@ -13,12 +13,18 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.StandardCopyOption;
+import java.time.Duration;
+import java.time.Instant;
 import java.util.List;
 import java.util.Locale;
 import java.util.Optional;
 
 /**
- * Installs a newer BiteCheck release when the player asks for it.
+ * Installs a newer BiteCheck release on its own, without asking the player.
+ *
+ * <p>The window updates right after its check and starts again; the Steam start ({@code --wrap})
+ * downloads while the game runs and installs after it exits. Each version is tried on its own at
+ * most once a day; {@code auto_update = "off"} leaves only the update button.
  *
  * <p>Only installed launchers (MSI, DMG, DEB/RPM) update themselves; the portable zip keeps the
  * note with the link. The installer is downloaded from the GitHub release together with
@@ -28,8 +34,8 @@ import java.util.Optional;
  * as the new one).
  *
  * <ul>
- *   <li>Windows: {@code msiexec /passive} once BiteCheck has exited, then BiteCheck starts again.</li>
- *   <li>macOS: the app bundle is replaced from the DMG once BiteCheck has exited, then reopened.</li>
+ *   <li>Windows: {@code msiexec /quiet} (per-user install, no admin prompt) once BiteCheck has exited.</li>
+ *   <li>macOS: the app bundle is replaced from the DMG once BiteCheck has exited.</li>
  *   <li>Linux: packages need root, so BiteCheck only downloads and checks the package and shows the
  *       command to install it.</li>
  * </ul>
@@ -137,7 +143,7 @@ public final class SelfUpdate {
     }
 
     /** Starts the installation, or on Linux returns the command for the player. */
-    public static Result install(Offer offer, Path installer) throws IOException {
+    public static Result install(Offer offer, Path installer, boolean restart) throws IOException {
         String app = System.getProperty("jpackage.app-path");
         String pid = Long.toString(ProcessHandle.current().pid());
         Path dir = installer.getParent();
@@ -145,7 +151,7 @@ public final class SelfUpdate {
             case WINDOWS -> {
                 // The values are written into the script: "cmd /c" mangles several quoted arguments.
                 Path script = dir.resolve("install-update.cmd");
-                Files.writeString(script, windowsScript(pid, installer.toString(), app), StandardCharsets.UTF_8);
+                Files.writeString(script, windowsScript(pid, installer.toString(), app, restart), StandardCharsets.UTF_8);
                 new ProcessBuilder("cmd", "/c", "start", "BiteCheck update", "/min", script.toString()).start();
                 return new Result(true, "");
             }
@@ -154,10 +160,10 @@ public final class SelfUpdate {
                 Path script = dir.resolve("install-update.sh");
                 Files.writeString(script, String.join("\n",
                         "#!/bin/sh",
-                        "# Waits for BiteCheck to exit, replaces the app from the DMG and opens it again.",
+                        "# Waits for BiteCheck to exit, replaces the app from the DMG and opens it again if asked ($4).",
                         "while kill -0 \"$1\" 2>/dev/null; do sleep 0.3; done",
                         "mnt=$(mktemp -d) || exit 1",
-                        "hdiutil attach -nobrowse -readonly -mountpoint \"$mnt\" \"$2\" >/dev/null || { open \"$2\"; exit 1; }",
+                        "hdiutil attach -nobrowse -readonly -mountpoint \"$mnt\" \"$2\" >/dev/null || exit 1",
                         "if [ -d \"$mnt/BiteCheck.app\" ]; then",
                         "  rm -rf \"$3.old\"",
                         "  if mv \"$3\" \"$3.old\"; then",
@@ -165,9 +171,11 @@ public final class SelfUpdate {
                         "  fi",
                         "fi",
                         "hdiutil detach \"$mnt\" -quiet",
-                        "open \"$3\"",
+                        "[ \"$4\" = 1 ] && open \"$3\"",
+                        "exit 0",
                         ""), StandardCharsets.UTF_8);
-                new ProcessBuilder("/bin/sh", script.toString(), pid, installer.toString(), bundle.toString()).start();
+                new ProcessBuilder("/bin/sh", script.toString(), pid, installer.toString(), bundle.toString(),
+                        restart ? "1" : "0").start();
                 return new Result(true, "");
             }
             default -> {
@@ -178,16 +186,52 @@ public final class SelfUpdate {
         }
     }
 
-    /** Waits for BiteCheck (pid) to exit, installs the MSI and starts BiteCheck again. */
-    static String windowsScript(String pid, String msi, String app) {
+    /** Waits for BiteCheck (pid) to exit, installs the MSI silently and, if asked, starts BiteCheck again. */
+    static String windowsScript(String pid, String msi, String app, boolean restart) {
         return String.join("\r\n",
                 "@echo off",
-                "rem Waits for BiteCheck to exit, installs the update and starts BiteCheck again.",
+                "rem Waits for BiteCheck to exit, installs the update and starts BiteCheck again if asked.",
                 ":wait",
                 "tasklist /FI \"PID eq " + pid + "\" 2>NUL | find \"" + pid + "\" >NUL && (ping -n 2 127.0.0.1 >NUL & goto wait)",
-                "msiexec /i \"" + cmdEscape(msi) + "\" /passive /norestart",
-                "start \"\" \"" + cmdEscape(app) + "\"",
+                "msiexec /i \"" + cmdEscape(msi) + "\" /quiet /norestart",
+                restart ? "start \"\" \"" + cmdEscape(app) + "\"" : "rem no restart",
                 "");
+    }
+
+    /**
+     * Whether BiteCheck may install this version on its own now: not turned off with
+     * {@code auto_update = "off"}, and not already tried in the last day (a failing install must
+     * not restart BiteCheck over and over).
+     */
+    static boolean autoAllowed(Config config, Path updatesDir, String version, Instant now) {
+        if ("off".equals(config.string("auto_update").orElse(""))) {
+            return false;
+        }
+        Path marker = updatesDir.resolve("attempt-" + version);
+        try {
+            return !Files.exists(marker)
+                    || Files.getLastModifiedTime(marker).toInstant().isBefore(now.minus(Duration.ofDays(1)));
+        } catch (IOException e) {
+            return false;
+        }
+    }
+
+    /** Downloads, checks and installs without asking; remembers the attempt (see {@link #autoAllowed}). */
+    public static Result auto(Offer offer, Path updatesDir, Config config, boolean restart) throws IOException {
+        return install(offer, prepare(offer, updatesDir, config), restart);
+    }
+
+    /** Downloads and checks the installer; remembers the attempt (see {@link #autoAllowed}). */
+    public static Path prepare(Offer offer, Path updatesDir, Config config) throws IOException {
+        Keys.PublicKeyInfo key = IndexClient.releaseKey(config).orElseThrow(() -> new IOException("No release key is built in."));
+        Files.createDirectories(updatesDir);
+        Files.writeString(updatesDir.resolve("attempt-" + offer.version()), Instant.now().toString());
+        return download(offer, updatesDir, key);
+    }
+
+    /** The offer, if BiteCheck should install it on its own now. */
+    public static Optional<Offer> autoOffer(String version, Config config, Path updatesDir) {
+        return offer(version, config).filter(o -> autoAllowed(config, updatesDir, version, Instant.now()));
     }
 
     /** Windows paths cannot contain quotes; % is the only character a .cmd file would expand. */

@@ -52,7 +52,7 @@ The `Timestamp` workflow (`timestamp.yml`) then runs daily. If the key leaks: cr
 
 ## The release key
 
-Installed launchers (MSI, DMG, DEB/RPM) offer an "Update to …" button when a newer release exists. They download the installer with `SHA256SUMS.txt` and `SHA256SUMS.txt.sig` and install only if the checksums are signed with the pinned release key and list the installer's hash under its exact name. The release key signs nothing else.
+Installed launchers (MSI, DMG, DEB/RPM) update themselves without asking when a newer release exists: the window right after its check (then it restarts), the Steam start after the game exits (Linux only downloads and shows the install command, since packages need root). They download the installer with `SHA256SUMS.txt` and `SHA256SUMS.txt.sig` and install only if the checksums are signed with the pinned release key and list the installer's hash under its exact name. The release key signs nothing else.
 
 ```sh
 cd keys

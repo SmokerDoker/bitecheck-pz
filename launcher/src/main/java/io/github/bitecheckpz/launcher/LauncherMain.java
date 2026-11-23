@@ -7,6 +7,7 @@ import java.awt.GraphicsEnvironment;
 import java.io.IOException;
 import java.io.PrintStream;
 import java.nio.file.Path;
+import java.time.Duration;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -183,6 +184,7 @@ public final class LauncherMain {
             err.println("Usage: BiteCheck --wrap <game command...>   (Steam: --wrap %command%)");
             return 2;
         }
+        BackgroundUpdate update = null;
         try {
             Session session = Session.run(dir, overrides);
             int changes = session.apply();
@@ -191,18 +193,72 @@ public final class LauncherMain {
             err.println("BiteCheck: " + session.rows.size() + " Java mod jar(s) checked, " + changes + " change(s), "
                     + blocked + " blocked.");
             session.notes.forEach(n -> err.println("BiteCheck note: " + n));
+            update = session.newerVersion
+                    .flatMap(v -> SelfUpdate.autoOffer(v, session.config, dir.resolve("updates")))
+                    .map(o -> BackgroundUpdate.start(o, dir.resolve("updates"), session.config))
+                    .orElse(null);
         } catch (IOException | RuntimeException e) {
             err.println("BiteCheck: check failed (" + e.getMessage() + "); starting the game anyway.");
         }
         try {
             Process game = new ProcessBuilder(command).inheritIO().start();
-            return game.waitFor();
+            int exit = game.waitFor();
+            if (update != null) {
+                update.installAfterGame(err);
+            }
+            return exit;
         } catch (IOException e) {
             err.println("BiteCheck: could not start " + command.get(0) + ": " + e.getMessage());
             return 1;
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
             return 1;
+        }
+    }
+
+    /**
+     * A self-update for the Steam start: downloaded and checked while the game runs, installed
+     * after it exits, so it never delays the game. BiteCheck is not restarted (the game is over).
+     */
+    private static final class BackgroundUpdate {
+        private final SelfUpdate.Offer offer;
+        private final Thread thread;
+        private volatile Path installer;
+        private volatile String problem;
+
+        private BackgroundUpdate(SelfUpdate.Offer offer, Path updatesDir, Config config) {
+            this.offer = offer;
+            this.thread = new Thread(() -> {
+                try {
+                    installer = SelfUpdate.prepare(offer, updatesDir, config);
+                } catch (IOException | RuntimeException e) {
+                    problem = e.getMessage();
+                }
+            }, "bitecheck-update");
+            thread.setDaemon(true);
+        }
+
+        static BackgroundUpdate start(SelfUpdate.Offer offer, Path updatesDir, Config config) {
+            BackgroundUpdate u = new BackgroundUpdate(offer, updatesDir, config);
+            u.thread.start();
+            return u;
+        }
+
+        void installAfterGame(PrintStream err) {
+            try {
+                thread.join(Duration.ofMinutes(3).toMillis());
+                if (installer == null) {
+                    err.println("BiteCheck: update to " + offer.version() + " not installed"
+                            + (problem != null ? ": " + problem : " (download not finished)."));
+                    return;
+                }
+                SelfUpdate.Result r = SelfUpdate.install(offer, installer, false);
+                err.println(r.exitNow() ? "BiteCheck: installing update " + offer.version() + "." : "BiteCheck: " + r.message());
+            } catch (IOException e) {
+                err.println("BiteCheck: update to " + offer.version() + " failed: " + e.getMessage());
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+            }
         }
     }
 
