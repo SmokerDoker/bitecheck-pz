@@ -50,7 +50,11 @@ final class LauncherWindow {
     private final JButton applyOnly = new JButton("Apply only");
     private final JButton start = new JButton("Start Project Zomboid");
     private final JButton steamSetup = new JButton("Steam setup…");
+    private final JButton update = new JButton("Update BiteCheck…");
     private Session session;
+    private SelfUpdate.Offer offer;
+    private boolean autoUpdateTried;
+    private boolean updating;
 
     private LauncherWindow(Path dir) {
         this.dir = dir;
@@ -119,6 +123,8 @@ final class LauncherWindow {
         content.add(center, BorderLayout.CENTER);
 
         JPanel buttons = new JPanel(new FlowLayout(FlowLayout.RIGHT, 8, 0));
+        update.setVisible(false);
+        buttons.add(update);
         buttons.add(steamSetup);
         buttons.add(allowFlagged);
         buttons.add(refresh);
@@ -132,6 +138,11 @@ final class LauncherWindow {
         applyOnly.addActionListener(e -> apply(false));
         start.addActionListener(e -> apply(true));
         steamSetup.addActionListener(e -> showSteamSetup());
+        update.addActionListener(e -> {
+            if (offer != null) {
+                runUpdate(offer, false);
+            }
+        });
 
         frame.setContentPane(content);
         frame.pack();
@@ -141,7 +152,8 @@ final class LauncherWindow {
         check();
     }
 
-    private void setBusy(boolean busy) {
+    private void setBusy(boolean requested) {
+        boolean busy = requested || updating; // an update in progress keeps the buttons off
         refresh.setEnabled(!busy);
         applyOnly.setEnabled(!busy && session != null);
         start.setEnabled(!busy && session != null);
@@ -208,6 +220,69 @@ final class LauncherWindow {
         }
         notes.setText(text.toString().strip());
         notes.setCaretPosition(0);
+        offer = s.newerVersion.flatMap(v -> SelfUpdate.offer(v, s.config)).orElse(null);
+        update.setVisible(offer != null && !updating);
+        if (offer != null) {
+            update.setText("Update to " + offer.version());
+            if (!autoUpdateTried && SelfUpdate.autoOffer(offer.version(), s.config, dir.resolve("updates")).isPresent()) {
+                autoUpdateTried = true;
+                runUpdate(offer, true);
+            }
+        }
+    }
+
+    /**
+     * Downloads the newer release, checks its signature and installs it (see {@link SelfUpdate}).
+     * Automatic updates run without any question; problems only end up in the notes. The button
+     * is the fallback when an automatic update failed.
+     */
+    private void runUpdate(SelfUpdate.Offer o, boolean auto) {
+        updating = true;
+        update.setVisible(false);
+        setBusy(true);
+        summary.setText("Updating BiteCheck to " + o.version() + "…");
+        Config config = session != null ? session.config : Config.empty();
+        new SwingWorker<SelfUpdate.Result, Void>() {
+            @Override
+            protected SelfUpdate.Result doInBackground() throws Exception {
+                return SelfUpdate.auto(o, dir.resolve("updates"), config, true);
+            }
+
+            @Override
+            protected void done() {
+                String problem = null;
+                try {
+                    SelfUpdate.Result result = get();
+                    if (result.exitNow()) {
+                        frame.dispose();
+                        System.exit(0);
+                    }
+                    problem = result.message();
+                } catch (InterruptedException e) {
+                    Thread.currentThread().interrupt();
+                } catch (ExecutionException e) {
+                    problem = "The update to " + o.version() + " failed: " + e.getCause().getMessage()
+                            + " You can download it yourself: " + UpdateCheck.RELEASES_URL;
+                }
+                updating = false;
+                setBusy(false);
+                if (session != null) {
+                    show(session);
+                }
+                if (problem != null) {
+                    if (auto) {
+                        notes.setText(problem + "\n\n" + notes.getText());
+                        notes.setCaretPosition(0);
+                    } else {
+                        JTextArea text = new JTextArea(problem, 8, 70);
+                        text.setEditable(false);
+                        text.setLineWrap(true);
+                        JOptionPane.showMessageDialog(frame, new JScrollPane(text), "Update BiteCheck",
+                                JOptionPane.INFORMATION_MESSAGE);
+                    }
+                }
+            }
+        }.execute();
     }
 
     private static long count(List<Planner.Row> rows, Verifier.Status status) {

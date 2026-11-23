@@ -24,6 +24,8 @@ public final class Session {
     public final List<Planner.Row> rows;
     public final List<String> notes = new ArrayList<>();
     public final Instant now;
+    /** A newer BiteCheck release, if there is one (see {@link UpdateCheck}). */
+    public Optional<String> newerVersion = Optional.empty();
 
     private Session(Platform platform, Config config, LauncherState state, ZombieBuddyApprovals approvals,
             List<JavaMods.JavaMod> mods, IndexClient.Outcome index, List<Planner.Row> rows, Instant now) {
@@ -64,7 +66,8 @@ public final class Session {
         if (platform.workshopContentDirs().isEmpty() && platform.steamRoots().isEmpty()) {
             session.notes.add("Steam was not found. Set steam_dir in " + biteCheckDir.resolve("config.toml") + ".");
         }
-        UpdateCheck.note(config).ifPresent(session.notes::add);
+        session.newerVersion = UpdateCheck.newerVersion(config);
+        session.newerVersion.map(UpdateCheck::note).ifPresent(session.notes::add);
         return session;
     }
 
@@ -81,6 +84,7 @@ public final class Session {
         Session s = new Session(platform, config, state, approvals, mods, index,
                 Planner.plan(mods, index.index(), now, approvals, state), now);
         s.notes.addAll(notes);
+        s.newerVersion = newerVersion;
         return s;
     }
 }

@@ -50,6 +50,21 @@ cd keys
 
 The `Timestamp` workflow (`timestamp.yml`) then runs daily. If the key leaks: create a new one, replace the secret and release a launcher; until then the worst case is that launchers keep the current index for up to 45 days instead of a newer one.
 
+## The release key
+
+Installed launchers (MSI, DMG, DEB/RPM) update themselves without asking when a newer release exists: the window right after its check (then it restarts), the Steam start after the game exits (Linux only downloads and shows the install command, since packages need root). They download the installer with `SHA256SUMS.txt` and `SHA256SUMS.txt.sig` and install only if the checksums are signed with the pinned release key and list the installer's hash under its exact name. The release key signs nothing else.
+
+```sh
+cd keys
+../cli/build/install/bcz/bin/bcz keygen release
+```
+
+1. **Settings → Environments → New environment** `release-signing`, deployment branches and tags: only tags `v*`. Optional: yourself as required reviewer (every release then waits for your approval).
+2. Add the secret `BITECHECK_RELEASE_KEY` there (all three lines of `~/.bitecheck/keys/release.key`) and back the key up offline.
+3. Commit `keys/release.pub`. Launchers built from then on pin it; older launchers keep showing only the link.
+
+The `publish` job in `release.yml` signs `SHA256SUMS.txt`. Without the secret it warns and publishes unsigned, and launchers do not install that release. If the key leaks: create a new one, replace the secret and release a launcher; players with the old launcher update by hand once.
+
 ## 5. Trust levels
 
 Reviewers are added with a public key in `keys/reviewers/<name>.pub` and an entry in `keys/trust.toml`:

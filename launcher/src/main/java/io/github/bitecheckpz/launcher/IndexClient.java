@@ -71,6 +71,11 @@ public final class IndexClient {
         return pinnedKey(config, "timestamp_key", "timestamp.pub");
     }
 
+    /** Built-in release key (signs SHA256SUMS.txt of each launcher release), or the one configured for testing. */
+    public static Optional<Keys.PublicKeyInfo> releaseKey(Config config) throws IOException {
+        return pinnedKey(config, "release_key", "release.pub");
+    }
+
     private static Optional<Keys.PublicKeyInfo> pinnedKey(Config config, String setting, String resource)
             throws IOException {
         try {

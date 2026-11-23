@@ -11,10 +11,10 @@ application {
     mainClass.set("io.github.bitecheckpz.launcher.LauncherMain")
 }
 
-// The registry's and the timestamp public keys are built into the launcher (pinned), when they exist.
+// The registry, timestamp and release public keys are built into the launcher (pinned), when they exist.
 tasks.processResources {
     from(rootProject.file("keys")) {
-        include("registry.pub", "timestamp.pub")
+        include("registry.pub", "timestamp.pub", "release.pub")
         into("io/github/bitecheckpz/launcher")
     }
 }

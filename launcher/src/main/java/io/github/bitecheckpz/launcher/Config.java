@@ -21,7 +21,8 @@ import java.util.Optional;
  * zombiebuddy_dir = "…"                  # instead of ~/.zombie_buddy
  * steam_dir = "…", game_dir = "…", workshop_dir = "…"
  * server_dir = "…"                       # dedicated server install (SteamCMD); sets game and workshop folders
- * update_check = "off"                   # no hint about newer launcher releases
+ * update_check = "off"                   # no hint about newer launcher releases and no updates
+ * auto_update = "off"                    # no automatic updates; the window shows an update button
  * </pre>
  */
 public final class Config {
