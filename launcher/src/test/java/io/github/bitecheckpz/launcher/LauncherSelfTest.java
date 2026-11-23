@@ -273,6 +273,16 @@ public final class LauncherSelfTest {
             String done = "\"/x/bitecheck.sh\" --wrap %command% -x";
             expect(SteamSetup.launchOptions(Platform.Os.LINUX, script, java.util.Optional.of(done)), done);
             expect(SteamSetup.isSetUp(java.util.Optional.of(done)), true);
+            // another tool's wrapper (Jumpstart) is not BiteCheck: BiteCheck goes in front of %command%
+            String jumpstart = "\"C:\\Users\\me\\AppData\\Local\\Jumpstart\\Jumpstart.exe\" --wrap %command% -agentlib:zbNative --";
+            expect(SteamSetup.isSetUp(java.util.Optional.of(jumpstart)), false);
+            String both = SteamSetup.launchOptions(Platform.Os.WINDOWS, script, java.util.Optional.of(jumpstart));
+            expect(both, "\"C:\\Users\\me\\AppData\\Local\\Jumpstart\\Jumpstart.exe\" --wrap " + quoted
+                    + " --wrap %command% -agentlib:zbNative --");
+            expect(SteamSetup.isSetUp(java.util.Optional.of(both)), true);
+            expect(SteamSetup.launchOptions(Platform.Os.WINDOWS, script, java.util.Optional.of(both)), both);
+            expect(SteamSetup.isSetUp(java.util.Optional.of("\"C:\\Program Files\\BiteCheck\\BiteCheck.exe\" --wrap %command%")), true);
+            expect(SteamSetup.isSetUp(java.util.Optional.of("\"/Applications/BiteCheck.app/Contents/MacOS/BiteCheck\" --wrap %command%")), true);
         });
         run("wrap: applies the decisions, runs the game command and passes its exit code", () -> {
             World w = World.create();
