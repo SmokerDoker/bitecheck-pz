@@ -8,10 +8,14 @@ import java.awt.Component;
 import java.awt.Dimension;
 import java.awt.FlowLayout;
 import java.awt.Font;
+import java.awt.Image;
+import java.net.URL;
 import java.nio.file.Path;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.ExecutionException;
 import javax.swing.BorderFactory;
+import javax.swing.ImageIcon;
 import javax.swing.JButton;
 import javax.swing.JFrame;
 import javax.swing.JLabel;
@@ -63,8 +67,21 @@ final class LauncherWindow {
         });
     }
 
+    /** The BiteCheck logo in several sizes, for the title bar and the taskbar. */
+    private static List<Image> icons() {
+        List<Image> icons = new ArrayList<>();
+        for (int size : new int[] {16, 32, 48, 64, 128, 256}) {
+            URL url = LauncherWindow.class.getResource("icon-" + size + ".png");
+            if (url != null) {
+                icons.add(new ImageIcon(url).getImage());
+            }
+        }
+        return icons;
+    }
+
     private void show() {
         frame.setDefaultCloseOperation(JFrame.EXIT_ON_CLOSE);
+        frame.setIconImages(icons());
         JPanel content = new JPanel(new BorderLayout(8, 8));
         content.setBorder(BorderFactory.createEmptyBorder(12, 12, 12, 12));
 

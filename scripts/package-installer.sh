@@ -48,21 +48,35 @@ common=(
     --jlink-options "--strip-debug --no-header-files --no-man-pages"
 )
 
+# The BiteCheck logo (launcher/src/packaging) as the app icon.
+ICONS="$ROOT/launcher/src/packaging"
+
 case "$TYPE" in
     msi)
         # A second launcher with a console, for command line use (BiteCheckConsole.exe --status).
-        printf 'win-console=true\n' > "$WORK/console.properties"
-        jpackage --type msi --name BiteCheck "${common[@]}" \
+        # Only the .exe in the install folder: no Start menu entry or desktop shortcut, so players
+        # see a single BiteCheck app.
+        printf 'win-console=true\nwin-menu=false\nwin-shortcut=false\nicon=%s\n' "$(win "$ICONS/bitecheck.ico")" \
+            > "$WORK/console.properties"
+        jpackage --type msi --name BiteCheck "${common[@]}" --icon "$(win "$ICONS/bitecheck.ico")" \
             --win-per-user-install --win-menu --win-menu-group BiteCheck --win-shortcut --win-dir-chooser \
             --win-upgrade-uuid ac45ad52-0986-4971-8a82-729276898e41 \
             --add-launcher BiteCheckConsole="$(win "$WORK/console.properties")"
         ;;
     dmg)
-        jpackage --type dmg --name BiteCheck "${common[@]}" \
+        # macOS wants an .icns; build it from the 1024 px logo with the system tools.
+        mkdir -p "$WORK/BiteCheck.iconset"
+        for s in 16 32 128 256 512; do
+            sips -z "$s" "$s" "$ICONS/bitecheck-1024.png" --out "$WORK/BiteCheck.iconset/icon_${s}x${s}.png" >/dev/null
+            sips -z $((s * 2)) $((s * 2)) "$ICONS/bitecheck-1024.png" \
+                --out "$WORK/BiteCheck.iconset/icon_${s}x${s}@2x.png" >/dev/null
+        done
+        iconutil -c icns "$WORK/BiteCheck.iconset" -o "$WORK/BiteCheck.icns"
+        jpackage --type dmg --name BiteCheck "${common[@]}" --icon "$WORK/BiteCheck.icns" \
             --mac-package-identifier io.github.bitecheckpz.launcher --mac-package-name BiteCheck
         ;;
     deb | rpm)
-        jpackage --type "$TYPE" --name bitecheck "${common[@]}" \
+        jpackage --type "$TYPE" --name bitecheck "${common[@]}" --icon "$ICONS/bitecheck.png" \
             --linux-package-name bitecheck --linux-shortcut --linux-menu-group Game \
             --linux-app-category games
         ;;
