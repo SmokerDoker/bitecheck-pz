@@ -144,6 +144,14 @@ public final class SelfUpdate {
 
     /** Starts the installation, or on Linux returns the command for the player. */
     public static Result install(Offer offer, Path installer, boolean restart) throws IOException {
+        return install(offer, installer, restart, false);
+    }
+
+    /**
+     * @param repair install the same version again over a changed installation (see {@link SelfCheck});
+     *               on Windows a reinstall of all files, as a plain install of the same version does nothing
+     */
+    public static Result install(Offer offer, Path installer, boolean restart, boolean repair) throws IOException {
         String app = System.getProperty("jpackage.app-path");
         String pid = Long.toString(ProcessHandle.current().pid());
         Path dir = installer.getParent();
@@ -151,7 +159,8 @@ public final class SelfUpdate {
             case WINDOWS -> {
                 // The values are written into the script: "cmd /c" mangles several quoted arguments.
                 Path script = dir.resolve("install-update.cmd");
-                Files.writeString(script, windowsScript(pid, installer.toString(), app, restart), StandardCharsets.UTF_8);
+                Files.writeString(script, windowsScript(pid, installer.toString(), app, restart, repair),
+                        StandardCharsets.UTF_8);
                 new ProcessBuilder("cmd", "/c", "start", "BiteCheck update", "/min", script.toString()).start();
                 return new Result(true, "");
             }
@@ -179,7 +188,9 @@ public final class SelfUpdate {
                 return new Result(true, "");
             }
             default -> {
-                String tool = installer.toString().endsWith(".rpm") ? "sudo dnf install" : "sudo apt install";
+                boolean rpm = installer.toString().endsWith(".rpm");
+                String tool = repair ? (rpm ? "sudo dnf reinstall" : "sudo apt install --reinstall")
+                        : rpm ? "sudo dnf install" : "sudo apt install";
                 return new Result(false, "BiteCheck " + offer.version() + " was downloaded and its signature checked:\n"
                         + installer + "\n\nInstall it in a terminal with:\n" + tool + " '" + installer + "'");
             }
@@ -188,12 +199,16 @@ public final class SelfUpdate {
 
     /** Waits for BiteCheck (pid) to exit, installs the MSI silently and, if asked, starts BiteCheck again. */
     static String windowsScript(String pid, String msi, String app, boolean restart) {
+        return windowsScript(pid, msi, app, restart, false);
+    }
+
+    static String windowsScript(String pid, String msi, String app, boolean restart, boolean repair) {
         return String.join("\r\n",
                 "@echo off",
                 "rem Waits for BiteCheck to exit, installs the update and starts BiteCheck again if asked.",
                 ":wait",
                 "tasklist /FI \"PID eq " + pid + "\" 2>NUL | find \"" + pid + "\" >NUL && (ping -n 2 127.0.0.1 >NUL & goto wait)",
-                "msiexec /i \"" + cmdEscape(msi) + "\" /quiet /norestart",
+                "msiexec " + (repair ? "/fa" : "/i") + " \"" + cmdEscape(msi) + "\" /quiet /norestart",
                 restart ? "start \"\" \"" + cmdEscape(app) + "\"" : "rem no restart",
                 "");
     }
@@ -218,7 +233,12 @@ public final class SelfUpdate {
 
     /** Downloads, checks and installs without asking; remembers the attempt (see {@link #autoAllowed}). */
     public static Result auto(Offer offer, Path updatesDir, Config config, boolean restart) throws IOException {
-        return install(offer, prepare(offer, updatesDir, config), restart);
+        return auto(offer, updatesDir, config, restart, false);
+    }
+
+    public static Result auto(Offer offer, Path updatesDir, Config config, boolean restart, boolean repair)
+            throws IOException {
+        return install(offer, prepare(offer, updatesDir, config), restart, repair);
     }
 
     /** Downloads and checks the installer; remembers the attempt (see {@link #autoAllowed}). */
@@ -252,7 +272,7 @@ public final class SelfUpdate {
                 ? Optional.of(p) : Optional.empty();
     }
 
-    private static void fetch(URI uri, Path target) throws IOException {
+    static void fetch(URI uri, Path target) throws IOException {
         HttpURLConnection http = (HttpURLConnection) uri.toURL().openConnection();
         try {
             http.setConnectTimeout(TIMEOUT_MS);

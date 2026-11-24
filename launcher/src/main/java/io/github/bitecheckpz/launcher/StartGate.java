@@ -109,6 +109,13 @@ final class StartGate {
             }
         }
         Path stateFile = biteCheckDir.resolve("state.toml");
+        if (session.state.tampered()) {
+            JOptionPane.showMessageDialog(parent, "<html><b>Your saved answers were changed outside BiteCheck.</b><br><br>"
+                    + "Something on this computer edited " + LauncherWindow.escape(stateFile.toString()) + ".<br>"
+                    + "BiteCheck ignores those answers and asks you again. If you did not edit the file yourself,<br>"
+                    + "check your computer with an antivirus program.</html>",
+                    "Answers changed", JOptionPane.WARNING_MESSAGE);
+        }
         for (Question q : questions(session)) {
             boolean yes = ask(parent, q, stateFile);
             for (Planner.Row r : q.rows()) {
