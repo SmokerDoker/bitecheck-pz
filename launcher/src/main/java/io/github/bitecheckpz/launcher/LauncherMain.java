@@ -26,7 +26,7 @@ import java.util.Map;
  * BiteCheck --steam-options          show the Steam launch options that run BiteCheck automatically
  * BiteCheck --allow &lt;sha256&gt;        allow an unverified mod ahead of time (e.g. on a server)
  * BiteCheck --allow &lt;sha256&gt; --i-understand-the-risk   allow a flagged or suspicious mod
- * BiteCheck --revoke &lt;sha256&gt;       take back an --allow
+ * BiteCheck --revoke &lt;sha256&gt;       take back your answer about a jar
  * BiteCheck --export &lt;file&gt;         write the installed Java mods with their hashes
  * BiteCheck --compare &lt;file&gt;        compare the installed Java mods with an exported list
  *
@@ -175,9 +175,11 @@ public final class LauncherMain {
     }
 
     /**
-     * Applies the decisions, then runs the game command and returns its exit code. BiteCheck
-     * problems never keep the game from starting: decisions written earlier stay in place and
-     * ZombieBuddy asks about anything new, as without BiteCheck.
+     * Applies the decisions, asks the player about mods that are not verified (see {@link StartGate}),
+     * then runs the game command and returns its exit code. The game does not start if the player
+     * does not allow ZombieBuddy itself. BiteCheck problems never keep the game from starting:
+     * decisions written earlier stay in place and ZombieBuddy asks about anything new, as without
+     * BiteCheck.
      */
     static int wrap(Path dir, Map<String, String> overrides, List<String> command, PrintStream err) {
         if (command.isEmpty()) {
@@ -185,20 +187,34 @@ public final class LauncherMain {
             return 2;
         }
         BackgroundUpdate update = null;
+        Session session = null;
         try {
-            Session session = Session.run(dir, overrides);
-            int changes = session.apply();
-            long blocked = session.rows.stream()
-                    .filter(r -> Boolean.FALSE.equals(session.approvals.decision(r.jar().sha256()))).count();
+            Session checked = Session.run(dir, overrides);
+            session = checked;
+            int changes = checked.apply();
+            long blocked = checked.rows.stream()
+                    .filter(r -> Boolean.FALSE.equals(checked.approvals.decision(r.jar().sha256()))).count();
             err.println("BiteCheck: " + session.rows.size() + " Java mod jar(s) checked, " + changes + " change(s), "
                     + blocked + " blocked.");
             session.notes.forEach(n -> err.println("BiteCheck note: " + n));
+            Config config = session.config;
             update = session.newerVersion
-                    .flatMap(v -> SelfUpdate.autoOffer(v, session.config, dir.resolve("updates")))
-                    .map(o -> BackgroundUpdate.start(o, dir.resolve("updates"), session.config))
+                    .flatMap(v -> SelfUpdate.autoOffer(v, config, dir.resolve("updates")))
+                    .map(o -> BackgroundUpdate.start(o, dir.resolve("updates"), config))
                     .orElse(null);
         } catch (IOException | RuntimeException e) {
             err.println("BiteCheck: check failed (" + e.getMessage() + "); starting the game anyway.");
+            session = null;
+        }
+        if (session != null) {
+            try {
+                if (!StartGate.beforeStart(session, dir, err)) {
+                    return 1;
+                }
+            } catch (IOException | RuntimeException e) {
+                err.println("BiteCheck: could not ask about new mods (" + e.getMessage()
+                        + "); they stay off. Starting the game.");
+            }
         }
         try {
             Process game = new ProcessBuilder(command).inheritIO().start();
@@ -293,9 +309,11 @@ public final class LauncherMain {
                     + ". To load it anyway: BiteCheck --allow " + sha + " --i-understand-the-risk");
             return 2;
         }
+        session.state.refused().remove(sha);
         session.state.allowedAnyway().put(sha, row.needsPermission() ? "allowed by the player" : "approved ahead of time");
         session.replan().apply();
-        out.println("Allowed " + row.mod().id() + " " + row.jar().path().getFileName() + ". ZombieBuddy will load it.");
+        out.println("Allowed " + row.mod().id() + " " + row.jar().path().getFileName() + "."
+                + (row.mod().isLoader() ? " The game starts with it." : " ZombieBuddy will load it."));
         return 0;
     }
 
@@ -307,21 +325,14 @@ public final class LauncherMain {
         }
         String sha = rest.get(1);
         Session session = Session.run(dir, overrides);
-        if (session.state.allowedAnyway().remove(sha) == null) {
-            err.println("This hash was not allowed with --allow.");
+        boolean allowed = session.state.allowedAnyway().remove(sha) != null;
+        boolean refused = session.state.refused().remove(sha) != null;
+        if (!allowed && !refused) {
+            err.println("You have not answered about this hash yet.");
             return 1;
         }
-        Session replanned = session.replan();
-        boolean needsPermission = replanned.rows.stream()
-                .anyMatch(r -> r.jar().sha256().equals(sha) && r.needsPermission());
-        if (!needsPermission && replanned.approvals.decision(sha) != null
-                && replanned.rows.stream().anyMatch(r -> r.jar().sha256().equals(sha)
-                        && r.status() == Verifier.Status.UNVERIFIED)) {
-            replanned.approvals.remove(sha); // ZombieBuddy asks again
-        }
-        replanned.apply();
-        out.println("Taken back. " + (needsPermission ? "BiteCheck blocks this mod again."
-                : "ZombieBuddy will ask about this mod again."));
+        session.replan().apply();
+        out.println("Taken back. The mod stays off until you answer again; BiteCheck asks before the next start.");
         return 0;
     }
 
@@ -339,7 +350,8 @@ public final class LauncherMain {
         for (Planner.Row r : session.rows) {
             out.printf("%-10s %-24s %-28s %s -> %s%n", r.suspicious() ? "SUSPICIOUS" : r.status(), r.mod().id(),
                     r.jar().path().getFileName(), r.info(), describe(r.action()));
-            out.println("           sha256 " + r.jar().sha256() + (r.allowedAnyway() ? "  (allowed with --allow)" : ""));
+            out.println("           sha256 " + r.jar().sha256() + (r.allowedAnyway() ? "  (allowed by you)"
+                    : r.refused() ? "  (not allowed by you)" : r.undecided() ? "  (BiteCheck asks before the start)" : ""));
         }
         return 0;
     }
@@ -369,7 +381,6 @@ public final class LauncherMain {
             case NONE -> "no change";
             case ALLOW -> "allow in ZombieBuddy";
             case DENY -> "block in ZombieBuddy";
-            case ASK_IN_GAME -> "ZombieBuddy will ask again";
         };
     }
 }

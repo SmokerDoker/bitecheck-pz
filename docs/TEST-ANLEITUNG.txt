@@ -47,21 +47,23 @@ Ablauf
 
    Erwartet im BiteCheck-Fenster:
      BiteCheck Test: Verified     ✔ verified     -> "loads"
-     BiteCheck Test: Flagged      ⚠ flagged      -> "blocked"
-     BiteCheck Test: Unverified   ? unverified   -> "ZombieBuddy asks"
+     BiteCheck Test: Flagged      ⚠ flagged      -> "asks you first"
+     BiteCheck Test: Unverified   ? unverified   -> "asks you first"
                                                   (Details: "local scan: no findings")
-     BiteCheck Test: Suspicious   ⚠ suspicious   -> "blocked"
+     BiteCheck Test: Suspicious   ⚠ suspicious   -> "asks you first"
                                                   (Details: "local scan found: process")
    plus deine anderen Java-Mods, falls du welche hast (die stehen als "unverified",
-   weil sie nicht im Test-Index sind; an ihren bisherigen Freigaben ändert sich nichts).
+   weil sie nicht im Test-Index sind; BiteCheck fragt beim Start einmal nach ihnen).
    Unten sollte der Pfad zu Project Zomboid stehen ("Game: ...").
 
-5. "Start Project Zomboid" klicken. BiteCheck schließt sich, Steam startet das Spiel.
-
-   Erwartet im Spiel (beim Laden der Mods):
-     - ZombieBuddy fragt NUR nach "BiteCheck Test: Unverified". Bitte zulassen.
-     - KEINE Frage für "Verified" (lädt einfach), "Flagged" und "Suspicious"
-       (beide werden blockiert).
+5. "Start Project Zomboid" klicken. Vor dem Start fragt BiteCheck nach jeder Mod,
+   die nicht geprüft ist (einmal, die Antwort wird gemerkt):
+     - "BiteCheck Test: Unverified": eine Frage. Bitte "Ja".
+     - "BiteCheck Test: Flagged" und "Suspicious": zwei Bestätigungen
+       (Ja, dann ALLOW eintippen). Hier bitte "Nein", die bleiben aus.
+     - Keine Frage für "Verified" (lädt einfach).
+   Dann schließt sich BiteCheck und Steam startet das Spiel. ZombieBuddy fragt im
+   Spiel nichts mehr, BiteCheck hat alles schon entschieden.
 
 6. Ins Log schauen: %USERPROFILE%\Zomboid\console.txt öffnen und nach
      [BiteCheck test]
@@ -72,7 +74,7 @@ Ablauf
 
 7. Optional: markierte oder verdächtige Mod trotzdem erlauben.
    Spiel beenden, Start-Test-Windows.bat erneut starten, die Zeile
-   "BiteCheck Test: Flagged" (oder "Suspicious") anklicken, "Allow anyway..." ->
+   "BiteCheck Test: Flagged" (oder "Suspicious") anklicken, "Allow..." ->
    bestätigen -> ALLOW eintippen -> "Start Project Zomboid". Jetzt sollte im Log
    auch die Zeile für diese Mod erscheinen.
 

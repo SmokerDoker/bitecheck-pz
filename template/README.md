@@ -61,7 +61,8 @@ Elsewhere, tell it where the game or the dedicated server is installed:
 
 To try the mod, copy `build/bitecheck/` to `~/Zomboid/mods/MyMod/` (Windows:
 `%UserProfile%\Zomboid\mods\MyMod\`), enable it in the game's mod list and start the game with
-ZombieBuddy. ZombieBuddy asks before it loads an unverified jar.
+ZombieBuddy. An unverified jar loads after the player allows it (BiteCheck asks before the start,
+ZombieBuddy asks if BiteCheck is not used).
 
 Check that your build is reproducible: build twice (`./gradlew clean bitecheckMod`) and compare the
 SHA-256 of the jar (`sha256sum` or `certutil -hashfile <jar> SHA256`). It must not change.

@@ -94,6 +94,14 @@ public final class SteamSetup {
         return OWN_WRAPPER.matcher(options).find();
     }
 
+    /** Jumpstart's wrapper ({@code "…/Jumpstart" --wrap} or {@code … -jar "…/JumpstartSetup.jar" --wrap}). */
+    private static final Pattern JUMPSTART_WRAPPER = Pattern.compile(
+            "[Jj]umpstart[^\"/\\\\]*\"\\s+" + Pattern.quote(WRAP) + "(?:\\s|$)");
+
+    static boolean hasJumpstart(String options) {
+        return JUMPSTART_WRAPPER.matcher(options).find();
+    }
+
     /** True if the launch options already start BiteCheck. */
     public static boolean isSetUp(Optional<String> current) {
         return current.map(s -> hasOwnWrapper(s) && s.contains("%command%")).orElse(false);
