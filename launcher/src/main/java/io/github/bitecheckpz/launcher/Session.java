@@ -28,6 +28,21 @@ public final class Session {
     public final Map<String, String> steamUpdated;
     /** A newer BiteCheck release, if there is one (see {@link UpdateCheck}). */
     public Optional<String> newerVersion = Optional.empty();
+    /** Whether BiteCheck's own jar is the one of its signed release (see {@link SelfCheck}). */
+    public SelfCheck.Result selfCheck = SelfCheck.Result.unknown();
+
+    /** A release to install: a newer one, or the same one again to repair a changed installation. */
+    public record UpdateTarget(String version, boolean repair) {
+    }
+
+    /** What to install now, if anything: a newer release wins, as it also replaces a changed jar. */
+    public Optional<UpdateTarget> updateTarget() {
+        if (newerVersion.isPresent()) {
+            return Optional.of(new UpdateTarget(newerVersion.get(), false));
+        }
+        return selfCheck.outcome() == SelfCheck.Outcome.CHANGED
+                ? Optional.of(new UpdateTarget(selfCheck.version(), true)) : Optional.empty();
+    }
 
     private Session(Platform platform, Config config, LauncherState state, ZombieBuddyApprovals approvals,
             List<JavaMods.JavaMod> mods, IndexClient.Outcome index, List<Planner.Row> rows, Instant now,
@@ -63,6 +78,10 @@ public final class Session {
         Map<String, String> steamUpdated = platform.workshopUpdateTimes();
         List<Planner.Row> rows = Planner.plan(mods, usable, now, approvals, state, steamUpdated);
         Session session = new Session(platform, config, state, approvals, mods, index, rows, now, steamUpdated);
+        if (state.tampered()) {
+            session.notes.add("Your saved answers in " + biteCheckDir.resolve("state.toml") + " were changed outside "
+                    + "BiteCheck. BiteCheck does not use them and asks you again about mods that are not verified.");
+        }
         session.notes.addAll(index.notes());
         if (index.stale(now)) {
             session.notes.add("The registry index was last confirmed more than " + Index.MAX_AGE.toDays()
@@ -73,6 +92,10 @@ public final class Session {
         }
         session.newerVersion = UpdateCheck.newerVersion(config);
         session.newerVersion.map(UpdateCheck::note).ifPresent(session.notes::add);
+        session.selfCheck = SelfCheck.check(config, biteCheckDir.resolve("cache"));
+        if (session.selfCheck.outcome() == SelfCheck.Outcome.CHANGED) {
+            session.notes.add(0, SelfCheck.note(session.selfCheck));
+        }
         return session;
     }
 
@@ -98,6 +121,7 @@ public final class Session {
                 Planner.plan(mods, index.index(), now, approvals, state, steamUpdated), now, steamUpdated);
         s.notes.addAll(notes);
         s.newerVersion = newerVersion;
+        s.selfCheck = selfCheck;
         return s;
     }
 }

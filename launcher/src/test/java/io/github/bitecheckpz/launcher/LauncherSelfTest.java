@@ -355,6 +355,46 @@ public final class LauncherSelfTest {
             s.replan().apply();
             expect(((Map<?, ?>) ((Map<?, ?>) Json.parse(Files.readString(config))).get("preload_mods")).size(), 1);
         });
+        run("self check: own jar against the signed release checksums, repair installs the same release", () -> {
+            String jar = "ab".repeat(32);
+            List<String> sums = List.of("cd".repeat(32) + "  BiteCheck-0.2.0-windows-x64.msi", jar + "  BiteCheck.jar");
+            expect(SelfCheck.compare(sums, "0.2.0", jar).outcome(), SelfCheck.Outcome.OK);
+            SelfCheck.Result changed = SelfCheck.compare(sums, "0.2.0", "ef".repeat(32));
+            expect(changed.outcome(), SelfCheck.Outcome.CHANGED);
+            expect(changed.expected(), jar);
+            // an older release lists no jar: nothing to compare
+            expect(SelfCheck.compare(List.of(sums.get(0)), "0.1.9", jar).outcome(), SelfCheck.Outcome.UNKNOWN);
+            // a newer release wins over a repair; without one, the same release is installed again
+            String repairScript = SelfUpdate.windowsScript("1", "C:\\u\\BiteCheck.msi", "C:\\BiteCheck.exe", false, true);
+            expect(repairScript.contains("msiexec /fa \"C:\\u\\BiteCheck.msi\""), true);
+            expect(SelfUpdate.windowsScript("1", "C:\\u\\B.msi", "C:\\B.exe", false).contains("msiexec /i "), true);
+        });
+        run("state: answers changed outside BiteCheck are ignored", () -> {
+            Path dir = Files.createTempDirectory("bc-state");
+            Path file = dir.resolve("state.toml");
+            // a state file from before check values is accepted once, then gets a key and a check value
+            Files.writeString(file, "[allowed_anyway]\n" + "aa".repeat(32) + " = \"old answer\"\n");
+            LauncherState old = LauncherState.load(file);
+            expect(old.tampered(), false);
+            expect(old.allowedAnyway().size(), 1);
+            old.refused().put("bb".repeat(32), "no");
+            old.save();
+            expect(Files.isRegularFile(dir.resolve(LauncherState.KEY_FILE)), true);
+            LauncherState again = LauncherState.load(file);
+            expect(again.tampered(), false);
+            expect(again.allowedAnyway().size(), 1);
+            expect(again.refused().size(), 1);
+            // something adds an answer: the answers are not used, the player is asked again
+            Files.writeString(file, Files.readString(file).replace("[allowed_anyway]\n",
+                    "[allowed_anyway]\n" + "cc".repeat(32) + " = \"sneaky\"\n"));
+            LauncherState changed = LauncherState.load(file);
+            expect(changed.tampered(), true);
+            expect(changed.allowedAnyway().isEmpty(), true);
+            expect(changed.refused().isEmpty(), true);
+            // the check value line removed: the same
+            Files.writeString(file, Files.readString(file).replaceAll("(?m)^check = .*\\R", ""));
+            expect(LauncherState.load(file).tampered(), true);
+        });
         run("platform: reads when Steam updated the installed Workshop items", () -> {
             String acf = """
                     "AppWorkshop"

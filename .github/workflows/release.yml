@@ -124,7 +124,12 @@ jobs:
           # (README and website link there): BiteCheck-0.1.2-windows-x64.msi -> BiteCheck-windows-x64.msi
           v="${{ needs.build.outputs.version }}"
           for f in dist/*-"$v"*; do cp "$f" "${f/-$v/}"; done
-          cd dist && sha256sum * > SHA256SUMS.txt && cat SHA256SUMS.txt
+          # the launcher's own program file (the same jar is in every installer and the zip), listed so an
+          # installed BiteCheck can check itself against this signed file (SelfCheck.java)
+          jar="$(find artifacts -path '*/launcher/build/libs/BiteCheck.jar' | head -n 1)"
+          test -n "$jar"
+          jar_sha="$(sha256sum "$jar" | cut -d' ' -f1)"
+          cd dist && sha256sum * > SHA256SUMS.txt && echo "$jar_sha  BiteCheck.jar" >> SHA256SUMS.txt && cat SHA256SUMS.txt
       - name: Sign the checksums
         env:
           RELEASE_KEY: ${{ secrets.BITECHECK_RELEASE_KEY }}

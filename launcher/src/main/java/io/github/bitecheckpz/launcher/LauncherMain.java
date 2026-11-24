@@ -198,9 +198,11 @@ public final class LauncherMain {
                     + blocked + " blocked.");
             session.notes.forEach(n -> err.println("BiteCheck note: " + n));
             Config config = session.config;
-            update = session.newerVersion
-                    .flatMap(v -> SelfUpdate.autoOffer(v, config, dir.resolve("updates")))
-                    .map(o -> BackgroundUpdate.start(o, dir.resolve("updates"), config))
+            java.util.Optional<Session.UpdateTarget> target = checked.updateTarget();
+            boolean repair = target.map(Session.UpdateTarget::repair).orElse(false);
+            update = target
+                    .flatMap(u -> SelfUpdate.autoOffer(u.version(), config, dir.resolve("updates")))
+                    .map(o -> BackgroundUpdate.start(o, dir.resolve("updates"), config, repair))
                     .orElse(null);
         } catch (IOException | RuntimeException e) {
             err.println("BiteCheck: check failed (" + e.getMessage() + "); starting the game anyway.");
@@ -242,7 +244,10 @@ public final class LauncherMain {
         private volatile Path installer;
         private volatile String problem;
 
-        private BackgroundUpdate(SelfUpdate.Offer offer, Path updatesDir, Config config) {
+        private final boolean repair;
+
+        private BackgroundUpdate(SelfUpdate.Offer offer, Path updatesDir, Config config, boolean repair) {
+            this.repair = repair;
             this.offer = offer;
             this.thread = new Thread(() -> {
                 try {
@@ -254,8 +259,8 @@ public final class LauncherMain {
             thread.setDaemon(true);
         }
 
-        static BackgroundUpdate start(SelfUpdate.Offer offer, Path updatesDir, Config config) {
-            BackgroundUpdate u = new BackgroundUpdate(offer, updatesDir, config);
+        static BackgroundUpdate start(SelfUpdate.Offer offer, Path updatesDir, Config config, boolean repair) {
+            BackgroundUpdate u = new BackgroundUpdate(offer, updatesDir, config, repair);
             u.thread.start();
             return u;
         }
@@ -268,7 +273,7 @@ public final class LauncherMain {
                             + (problem != null ? ": " + problem : " (download not finished)."));
                     return;
                 }
-                SelfUpdate.Result r = SelfUpdate.install(offer, installer, false);
+                SelfUpdate.Result r = SelfUpdate.install(offer, installer, false, repair);
                 err.println(r.exitNow() ? "BiteCheck: installing update " + offer.version() + "." : "BiteCheck: " + r.message());
             } catch (IOException e) {
                 err.println("BiteCheck: update to " + offer.version() + " failed: " + e.getMessage());

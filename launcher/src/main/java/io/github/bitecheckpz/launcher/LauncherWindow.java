@@ -90,6 +90,8 @@ final class LauncherWindow {
     private Session session;
     private SelfUpdate.Offer offer;
     private boolean autoUpdateTried;
+    /** The offered install repairs a changed installation (same version again), see {@link SelfCheck}. */
+    private boolean repair;
     private boolean updating;
 
     private LauncherWindow(Path dir) {
@@ -397,10 +399,12 @@ final class LauncherWindow {
         s.notes.forEach(n -> text.append("Note: ").append(n).append('\n'));
         notes.setText(text.toString().strip());
         notes.setCaretPosition(0);
-        offer = s.newerVersion.flatMap(v -> SelfUpdate.offer(v, s.config)).orElse(null);
+        java.util.Optional<Session.UpdateTarget> target = s.updateTarget();
+        offer = target.flatMap(u -> SelfUpdate.offer(u.version(), s.config)).orElse(null);
+        repair = target.map(Session.UpdateTarget::repair).orElse(false);
         update.setVisible(offer != null && !updating);
         if (offer != null) {
-            update.setText("Update to " + offer.version());
+            update.setText(repair ? "Repair BiteCheck" : "Update to " + offer.version());
             if (!autoUpdateTried && SelfUpdate.autoOffer(offer.version(), s.config, dir.resolve("updates")).isPresent()) {
                 autoUpdateTried = true;
                 runUpdate(offer, true);
@@ -463,13 +467,15 @@ final class LauncherWindow {
         updating = true;
         update.setVisible(false);
         setBusy(true);
-        setVerdict(Tone.NOTE, "↻", "Updating BiteCheck to " + o.version() + "…",
-                "The new version is checked against its release signature before it is installed.");
+        boolean fix = repair;
+        setVerdict(Tone.NOTE, "↻", fix ? "Repairing BiteCheck…" : "Updating BiteCheck to " + o.version() + "…",
+                fix ? "BiteCheck's program file differs from its signed release; the release is installed again."
+                        : "The new version is checked against its release signature before it is installed.");
         Config config = session != null ? session.config : Config.empty();
         new SwingWorker<SelfUpdate.Result, Void>() {
             @Override
             protected SelfUpdate.Result doInBackground() throws Exception {
-                return SelfUpdate.auto(o, dir.resolve("updates"), config, true);
+                return SelfUpdate.auto(o, dir.resolve("updates"), config, true, fix);
             }
 
             @Override
