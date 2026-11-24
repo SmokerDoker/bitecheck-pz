@@ -100,8 +100,14 @@ public final class SelfUpdate {
         Path sums = dir.resolve(SUMS);
         fetch(URI.create(base + SUMS), sums);
         fetch(URI.create(base + SUMS + ".sig"), Signatures.signaturePath(sums));
-        Path installer = dir.resolve(offer.asset());
-        fetch(URI.create(base + offer.asset()), installer);
+        Signatures.Check sig = Signatures.verify(sums, releaseKey);
+        if (sig != Signatures.Check.VALID) {
+            throw new IOException("The release checksums are not signed by the BiteCheck release key ("
+                    + sig.description() + "). Nothing was installed.");
+        }
+        String asset = chooseAsset(offer, Files.readAllLines(sums, StandardCharsets.UTF_8));
+        Path installer = dir.resolve(asset);
+        fetch(URI.create(base + asset), installer);
         try {
             check(sums, installer, releaseKey);
         } catch (IOException e) {
@@ -110,6 +116,28 @@ public final class SelfUpdate {
         }
         return installer;
     }
+
+    /**
+     * The installer to use from a release's verified checksums. On Windows the protected installer
+     * ({@code -system.msi}, into Program Files, needs administrator rights) whenever the release has
+     * one; older releases only have the installer into the user's folder.
+     */
+    static String chooseAsset(Offer offer, List<String> verifiedSums) {
+        if (offer.os() == Platform.Os.WINDOWS && offer.asset().endsWith(".msi")) {
+            String system = systemAsset(offer.asset());
+            if (expectedHash(verifiedSums, system).isPresent()) {
+                return system;
+            }
+        }
+        return offer.asset();
+    }
+
+    /** BiteCheck-0.2.0-windows-x64.msi gives BiteCheck-0.2.0-windows-x64-system.msi. */
+    static String systemAsset(String msi) {
+        return msi.substring(0, msi.length() - ".msi".length()) + SYSTEM_SUFFIX;
+    }
+
+    static final String SYSTEM_SUFFIX = "-system.msi";
 
     /** Throws unless the checksums are signed with the release key and list the installer's hash. */
     static void check(Path sums, Path installer, Keys.PublicKeyInfo releaseKey) throws IOException {
@@ -157,6 +185,20 @@ public final class SelfUpdate {
         Path dir = installer.getParent();
         switch (offer.os()) {
             case WINDOWS -> {
+                if (installer.getFileName().toString().endsWith(SYSTEM_SUFFIX)) {
+                    // Into Program Files: Windows asks for administrator rights once (see elevatedScript).
+                    String outer = "$inner = '" + java.util.Base64.getEncoder().encodeToString(
+                            elevatedScript(pid, installer.toString(), Hashing.sha256Hex(installer), repair)
+                                    .getBytes(StandardCharsets.UTF_16LE)) + "'\n"
+                            + "Start-Process powershell.exe -Verb RunAs -Wait -WindowStyle Hidden -ArgumentList "
+                            + "'-NoProfile','-ExecutionPolicy','Bypass','-EncodedCommand',$inner\n"
+                            + (restart ? "$app = Join-Path $env:ProgramFiles 'BiteCheck\\BiteCheck.exe'\n"
+                                    + "if (Test-Path -LiteralPath $app) { Start-Process -FilePath $app }\n" : "");
+                    new ProcessBuilder("powershell.exe", "-NoProfile", "-ExecutionPolicy", "Bypass", "-WindowStyle",
+                            "Hidden", "-EncodedCommand", java.util.Base64.getEncoder().encodeToString(
+                                    outer.getBytes(StandardCharsets.UTF_16LE))).start();
+                    return new Result(true, "");
+                }
                 // The values are written into the script: "cmd /c" mangles several quoted arguments.
                 Path script = dir.resolve("install-update.cmd");
                 Files.writeString(script, windowsScript(pid, installer.toString(), app, restart, repair),
@@ -195,6 +237,33 @@ public final class SelfUpdate {
                         + installer + "\n\nInstall it in a terminal with:\n" + tool + " '" + installer + "'");
             }
         }
+    }
+
+    /**
+     * The part that runs with administrator rights: waits for BiteCheck (pid) to exit, copies the
+     * installer into a folder only administrators can change ({@code %ProgramData%\\BiteCheck\\updates},
+     * a new random file name), checks the copy's SHA-256 there and only then installs it. Nothing a
+     * program with the player's rights does to the downloaded file after BiteCheck checked it can
+     * get into the installation. Passed to PowerShell directly, never written to a file.
+     */
+    static String elevatedScript(String pid, String msi, String sha256, boolean repair) {
+        return String.join("\n",
+                "$ErrorActionPreference = 'Stop'",
+                "Wait-Process -Id " + Long.parseLong(pid) + " -ErrorAction SilentlyContinue",
+                "$dir = Join-Path $env:ProgramData 'BiteCheck\\updates'",
+                "New-Item -ItemType Directory -Force -Path $dir | Out-Null",
+                "$target = Join-Path $dir ([guid]::NewGuid().ToString() + '.msi')",
+                "Copy-Item -LiteralPath '" + msi.replace("'", "''") + "' -Destination $target",
+                "try {",
+                "  if ((Get-FileHash -Algorithm SHA256 -LiteralPath $target).Hash -ne '" + sha256.toUpperCase(Locale.ROOT)
+                        + "') { exit 1 }",
+                "  $p = Start-Process -FilePath msiexec.exe -Wait -PassThru -ArgumentList @('" + (repair ? "/fa" : "/i")
+                        + "', ('\"' + $target + '\"'), '/qn', '/norestart')",
+                "  exit $p.ExitCode",
+                "} finally {",
+                "  Remove-Item -LiteralPath $target -Force -ErrorAction SilentlyContinue",
+                "}",
+                "");
     }
 
     /** Waits for BiteCheck (pid) to exit, installs the MSI silently and, if asked, starts BiteCheck again. */
