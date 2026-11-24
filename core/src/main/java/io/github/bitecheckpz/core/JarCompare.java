@@ -42,7 +42,7 @@ public final class JarCompare {
             java.util.regex.Pattern.compile("META-INF/([^/]+)\\.(SF|RSA|DSA|EC)");
     private static final int MAX_SIGNERS = 4;
     private static final long MAX_SF_BYTES = 32L * 1024 * 1024;
-    private static final long MAX_BLOCK_BYTES = 64L * 1024;
+    private static final long MAX_BLOCK_BYTES = 16L * 1024;
 
     private JarCompare() {
     }
@@ -84,7 +84,8 @@ public final class JarCompare {
         for (Map.Entry<String, Attributes> e : manifest.getEntries().entrySet()) {
             Map<String, String> attributes = new TreeMap<>();
             e.getValue().forEach((k, v) -> attributes.put(k.toString(), String.valueOf(v)));
-            attributes.keySet().removeIf(k -> k.endsWith("-Digest")); // jar signature
+            // a jar signature's file hashes; any other attribute, or a value that is no hash, still counts
+            attributes.entrySet().removeIf(a -> a.getKey().endsWith("-Digest") && isDigestValueQuiet(a.getKey(), a.getValue()));
             if (!attributes.isEmpty()) {
                 sections.put(e.getKey(), attributes);
             }
@@ -122,6 +123,8 @@ public final class JarCompare {
     static boolean validSignature(Path jar) {
         Set<String> sf = new java.util.HashSet<>();
         Set<String> blocks = new java.util.HashSet<>();
+        Set<String> names = new java.util.HashSet<>();
+        List<byte[]> sfContents = new ArrayList<>();
         try (java.util.jar.JarFile jf = new java.util.jar.JarFile(jar.toFile(), true)) {
             for (Enumeration<java.util.jar.JarEntry> e = jf.entries(); e.hasMoreElements(); ) {
                 java.util.jar.JarEntry entry = e.nextElement();
@@ -132,8 +135,14 @@ public final class JarCompare {
                             || !(isSf ? sf : blocks).add(m.group(1))) {
                         return false;
                     }
+                    if (isSf) {
+                        try (InputStream in = jf.getInputStream(entry)) {
+                            sfContents.add(in.readAllBytes());
+                        }
+                    }
                     continue;
                 }
+                names.add(entry.getName());
                 try (InputStream in = jf.getInputStream(entry)) {
                     in.readAllBytes(); // reading checks the file against the signature
                 }
@@ -144,9 +153,64 @@ public final class JarCompare {
                     return false;
                 }
             }
-        } catch (IOException | SecurityException e) {
+            for (byte[] content : sfContents) {
+                if (!standardSignatureFile(content, names)) {
+                    return false;
+                }
+            }
+        } catch (IOException | SecurityException | IllegalArgumentException e) {
             return false;
         }
         return !sf.isEmpty() && sf.size() <= MAX_SIGNERS && sf.equals(blocks);
+    }
+
+    /**
+     * A .SF holding only what jarsigner writes, so nothing else can hide in it: Signature-Version,
+     * Created-By and manifest digests in the main section, and one section per file of the jar with
+     * only digest values (each the length of a real hash).
+     */
+    private static boolean standardSignatureFile(byte[] content, Set<String> names) throws IOException {
+        Manifest sf = new Manifest(new ByteArrayInputStream(content));
+        for (Map.Entry<Object, Object> a : sf.getMainAttributes().entrySet()) {
+            String key = a.getKey().toString();
+            boolean digest = key.endsWith("-Digest-Manifest") || key.endsWith("-Digest-Manifest-Main-Attributes");
+            if (digest ? !isDigestValue(key, String.valueOf(a.getValue()))
+                    : !key.equals("Signature-Version") && !key.equals("Created-By")) {
+                return false;
+            }
+        }
+        for (Map.Entry<String, Attributes> section : sf.getEntries().entrySet()) {
+            if (!names.contains(section.getKey()) || section.getValue().isEmpty()) {
+                return false;
+            }
+            for (Map.Entry<Object, Object> a : section.getValue().entrySet()) {
+                String key = a.getKey().toString();
+                if (!key.endsWith("-Digest") || !isDigestValue(key, String.valueOf(a.getValue()))) {
+                    return false;
+                }
+            }
+        }
+        return true;
+    }
+
+    private static boolean isDigestValueQuiet(String key, String value) {
+        try {
+            return isDigestValue(key, value);
+        } catch (IllegalArgumentException e) {
+            return false;
+        }
+    }
+
+    /** A known digest name (SHA-1/SHA-256/384/512) whose value is a Base64 hash of the right length. */
+    private static boolean isDigestValue(String key, String value) {
+        String algorithm = key.substring(0, key.indexOf("-Digest"));
+        int length = switch (algorithm) {
+            case "SHA1", "SHA-1" -> 20;
+            case "SHA-256" -> 32;
+            case "SHA-384" -> 48;
+            case "SHA-512" -> 64;
+            default -> -1;
+        };
+        return length > 0 && java.util.Base64.getDecoder().decode(value.strip()).length == length;
     }
 }
