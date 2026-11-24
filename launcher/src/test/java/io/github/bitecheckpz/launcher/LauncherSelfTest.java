@@ -115,6 +115,8 @@ public final class LauncherSelfTest {
             SelfUpdate.check(sums, installer, pub);
             Files.writeString(installer, "tampered");
             expectThrows(() -> SelfUpdate.check(sums, installer, pub));
+            // the elevated install gets the hash from the signed checksums, never from the (swapped) file
+            expect(SelfUpdate.signedHash(installer, pub), Hashing.sha256Hex("installer".getBytes(StandardCharsets.UTF_8)));
             Path older = dir.resolve("BiteCheck-0.1.4-windows-x64.msi");
             Files.writeString(older, "installer");
             expectThrows(() -> SelfUpdate.check(sums, older, pub)); // not listed under this name
@@ -368,6 +370,50 @@ public final class LauncherSelfTest {
             String repairScript = SelfUpdate.windowsScript("1", "C:\\u\\BiteCheck.msi", "C:\\BiteCheck.exe", false, true);
             expect(repairScript.contains("msiexec /fa \"C:\\u\\BiteCheck.msi\""), true);
             expect(SelfUpdate.windowsScript("1", "C:\\u\\B.msi", "C:\\B.exe", false).contains("msiexec /i "), true);
+        });
+        run("protected install: Program Files installer, checked copy, hand-over from the old copy", () -> {
+            // the protected installer is used as soon as a release lists it in its signed checksums
+            SelfUpdate.Offer win = new SelfUpdate.Offer("0.3.0", "BiteCheck-0.3.0-windows-x64.msi", Platform.Os.WINDOWS);
+            String h = "ab".repeat(32);
+            expect(SelfUpdate.chooseAsset(win, List.of(h + "  BiteCheck-0.3.0-windows-x64.msi")),
+                    "BiteCheck-0.3.0-windows-x64.msi");
+            expect(SelfUpdate.chooseAsset(win, List.of(h + "  BiteCheck-0.3.0-windows-x64.msi",
+                    h + "  BiteCheck-0.3.0-windows-x64-system.msi")), "BiteCheck-0.3.0-windows-x64-system.msi");
+            // the elevated part checks its own copy in an admin-only folder before msiexec runs
+            String script = SelfUpdate.elevatedScript("42", "C:\\Users\\o'neil\\BiteCheck.msi", "ab".repeat(32), false);
+            expect(script.contains("Wait-Process -Id 42"), true);
+            expect(script.contains("'C:\\Users\\o''neil\\BiteCheck.msi'"), true);
+            // a new folder in Program Files (only administrators can create one there), never reused
+            expect(script.contains("Join-Path $env:ProgramFiles ('BiteCheck-update-' + [guid]::NewGuid().ToString())"), true);
+            expect(script.contains("New-Item -ItemType Directory -Path $dir |"), true);
+            expect(script.contains("-Force -Path $dir"), false);
+            expect(script.indexOf("Get-FileHash") < script.indexOf("msiexec"), true);
+            expect(script.contains("-ne '" + "AB".repeat(32) + "') { exit 1 }"), true);
+            expect(SelfUpdate.elevatedScript("1", "x", h, true).contains("@('/fa'"), true);
+            // hand-over: an old copy forwards to the same launcher in Program Files, never the other way round
+            Path pf = Files.createTempDirectory("bc-pf");
+            Path local = Files.createTempDirectory("bc-local");
+            Files.createDirectories(pf.resolve("BiteCheck"));
+            Files.writeString(pf.resolve("BiteCheck/BiteCheck.exe"), "exe");
+            Map<String, String> env = Map.of("ProgramFiles", pf.toString(), "LOCALAPPDATA", local.toString());
+            expect(ProtectedInstall.forwardTarget(local.resolve("BiteCheck/BiteCheck.exe").toString(), env),
+                    Optional.of(pf.resolve("BiteCheck/BiteCheck.exe").toAbsolutePath().normalize()));
+            expect(ProtectedInstall.forwardTarget(pf.resolve("BiteCheck/BiteCheck.exe").toString(), env), Optional.empty());
+            expect(ProtectedInstall.forwardTarget(local.resolve("BiteCheck/BiteCheckConsole.exe").toString(), env),
+                    Optional.empty()); // no such launcher in Program Files
+            expect(ProtectedInstall.steamUsesOldCopy(Optional.of("\"" + local.resolve("BiteCheck/BiteCheck.exe")
+                    + "\" --wrap %command%"), env), true);
+            expect(ProtectedInstall.steamUsesOldCopy(Optional.of("\"" + pf.resolve("BiteCheck/BiteCheck.exe")
+                    + "\" --wrap %command%"), env), false);
+            // Windows Installer's packed product code (checked against the installer's own API)
+            expect(ProtectedInstall.unpackGuid("1F0B34C41E4A0563FAE2D6333519447E"), "{4C43B0F1-A4E1-3650-AF2E-6D33539144E7}");
+            expect(ProtectedInstall.productKeyFromQuery("""
+                    HKEY_CURRENT_USER\\Software\\Microsoft\\Installer\\Products\\1F0B34C41E4A0563FAE2D6333519447E
+                        ProductName    REG_SZ    BiteCheck
+
+                    HKEY_CURRENT_USER\\Software\\Microsoft\\Installer\\Products\\1F0B34C41E4A0563FAE2D6333519447E\\SourceList
+                        PackageName    REG_SZ    BiteCheck-0.1.6-windows-x64.msi
+                    """), Optional.of("1F0B34C41E4A0563FAE2D6333519447E"));
         });
         run("state: answers changed outside BiteCheck are ignored", () -> {
             Path dir = Files.createTempDirectory("bc-state");

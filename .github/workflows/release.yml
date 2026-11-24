@@ -51,6 +51,9 @@ jobs:
       matrix:
         include:
           - { os: windows-2022, type: msi, label: windows-x64 }
+          # into Program Files (administrator rights, protected from changes by other programs); the
+          # installer above (player's folder only) stays for launchers that cannot install this one yet
+          - { os: windows-2022, type: msi-system, label: windows-x64-system }
           - { os: macos-15, type: dmg, label: macos-arm64 }
           - { os: macos-15-intel, type: dmg, label: macos-x64 }
           - { os: ubuntu-22.04, type: deb, label: linux-x64 }
@@ -74,7 +77,7 @@ jobs:
           case "${{ matrix.type }}" in
             deb) sudo apt-get update -q && sudo apt-get install -y -q fakeroot ;;
             rpm) sudo apt-get update -q && sudo apt-get install -y -q rpm ;;
-            msi)
+            msi | msi-system)
               # jpackage needs the WiX Toolset 3 (candle.exe, light.exe)
               if ! command -v candle.exe >/dev/null; then
                 wix="$(ls -d "/c/Program Files (x86)/WiX Toolset v3"*/bin 2>/dev/null | head -n 1 || true)"

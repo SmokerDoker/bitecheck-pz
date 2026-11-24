@@ -52,6 +52,20 @@ public final class LauncherMain {
     }
 
     public static void main(String[] args) {
+        // An old copy in the player's folder hands over to the protected one in Program Files.
+        java.util.Optional<Path> protectedCopy =
+                ProtectedInstall.forwardTarget(System.getProperty("jpackage.app-path"), System.getenv());
+        if (protectedCopy.isPresent()) {
+            try {
+                System.exit(ProtectedInstall.forward(protectedCopy.get(), args));
+            } catch (java.io.IOException e) {
+                System.err.println("BiteCheck: could not start " + protectedCopy.get() + " (" + e.getMessage()
+                        + "); using this copy.");
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+                System.exit(1);
+            }
+        }
         int code = run(args, System.out, System.err);
         if (code >= 0) {
             System.exit(code);

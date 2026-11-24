@@ -92,6 +92,7 @@ public final class Session {
         }
         session.newerVersion = UpdateCheck.newerVersion(config);
         session.newerVersion.map(UpdateCheck::note).ifPresent(session.notes::add);
+        ProtectedInstall.removeOldCopy(platform, System.getenv()).ifPresent(session.notes::add);
         session.selfCheck = SelfCheck.check(config, biteCheckDir.resolve("cache"));
         if (session.selfCheck.outcome() == SelfCheck.Outcome.CHANGED) {
             session.notes.add(0, SelfCheck.note(session.selfCheck));

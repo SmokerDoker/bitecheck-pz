@@ -4,7 +4,8 @@
 #
 #   scripts/package-installer.sh <BiteCheck.jar> <version> <type> <outdir>
 #
-#   type: msi (Windows) | dmg (macOS) | deb | rpm (Linux)
+#   type: msi (Windows, into the player's folder) | msi-system (Windows, into Program Files)
+#         | dmg (macOS) | deb | rpm (Linux)
 #
 # Runs in CI (release.yml) on a runner of the matching OS. The installers are not code-signed:
 # Windows SmartScreen and macOS Gatekeeper show a warning on first start.
@@ -61,6 +62,16 @@ case "$TYPE" in
         jpackage --type msi --name BiteCheck "${common[@]}" --icon "$(win "$ICONS/bitecheck.ico")" \
             --win-per-user-install --win-menu --win-menu-group BiteCheck --win-shortcut --win-dir-chooser \
             --win-upgrade-uuid ac45ad52-0986-4971-8a82-729276898e41 \
+            --add-launcher BiteCheckConsole="$(win "$WORK/console.properties")"
+        ;;
+    msi-system)
+        # Into Program Files for all users: changing BiteCheck then needs administrator rights, so a
+        # program running as the player cannot. No folder choice, so it always lands there.
+        printf 'win-console=true\nwin-menu=false\nwin-shortcut=false\nicon=%s\n' "$(win "$ICONS/bitecheck.ico")" \
+            > "$WORK/console.properties"
+        jpackage --type msi --name BiteCheck "${common[@]}" --icon "$(win "$ICONS/bitecheck.ico")" \
+            --win-menu --win-menu-group BiteCheck --win-shortcut \
+            --win-upgrade-uuid 6f1d2c8e-5a37-4b8e-9c41-2d7e0b9a3f15 \
             --add-launcher BiteCheckConsole="$(win "$WORK/console.properties")"
         ;;
     dmg)

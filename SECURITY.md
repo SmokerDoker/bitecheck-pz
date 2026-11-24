@@ -34,6 +34,16 @@ you can do on your computer, including changing BiteCheck itself.
 
 **What makes tampering harder or visible**
 
+- **Protected installation.** On Windows, BiteCheck installs into `Program Files` (the
+  `-system.msi` installer), which only administrators can change, so a program running with your
+  rights cannot change BiteCheck itself. Windows therefore asks for administrator rights once per
+  update. The administrator part copies the installer into a new folder in `Program Files`, which
+  only administrators can create or change, checks it there against the hash from the signed
+  checksums, and only then installs it. An older installation in
+  your user folder hands over to the protected one and is removed once your Steam launch options
+  name the new one. On Linux the packages install into `/opt` (root-owned). On macOS, accounts
+  with administrator rights can change apps in `/Applications` without a prompt, so there this
+  gives little protection.
 - **Signed everything.** The registry index, every release, build record and review is signed;
   BiteCheck rejects an index that is older than one it has already seen.
 - **Tamper evidence for your answers.** BiteCheck's saved answers carry a check value. If
