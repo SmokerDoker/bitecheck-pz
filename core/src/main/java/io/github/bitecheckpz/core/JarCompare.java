@@ -60,7 +60,7 @@ public final class JarCompare {
             } else if (!b.containsKey(name)) {
                 differences.add(name + ": built from the source, missing in the other jar");
             } else if (name.equals(MANIFEST)) {
-                if (!manifestWithoutBuildInfo(a.get(name)).equals(manifestWithoutBuildInfo(b.get(name)))) {
+                if (!manifestWithoutBuildInfo(a.get(name), a).equals(manifestWithoutBuildInfo(b.get(name), b))) {
                     differences.add(name + ": attributes differ (beyond build tool and JDK)");
                 }
             } else if (!Arrays.equals(a.get(name), b.get(name))) {
@@ -74,8 +74,13 @@ public final class JarCompare {
     private record ManifestAttributes(Map<String, String> main, Map<String, Map<String, String>> sections) {
     }
 
-    /** The manifest's attributes without the build tool and JDK names. */
-    private static ManifestAttributes manifestWithoutBuildInfo(byte[] content) throws IOException {
+    /**
+     * The manifest's attributes without the build tool and JDK names, and without the per-entry
+     * hashes of a jar signature: a digest attribute is only left out if it is the real hash of that
+     * file in this jar, so no other data can hide under a digest name.
+     */
+    private static ManifestAttributes manifestWithoutBuildInfo(byte[] content, Map<String, byte[]> files)
+            throws IOException {
         Manifest manifest = new Manifest(new ByteArrayInputStream(content));
         Map<String, String> main = new TreeMap<>();
         manifest.getMainAttributes().forEach((k, v) -> main.put(k.toString(), String.valueOf(v)));
@@ -84,8 +89,8 @@ public final class JarCompare {
         for (Map.Entry<String, Attributes> e : manifest.getEntries().entrySet()) {
             Map<String, String> attributes = new TreeMap<>();
             e.getValue().forEach((k, v) -> attributes.put(k.toString(), String.valueOf(v)));
-            // a jar signature's file hashes; any other attribute, or a value that is no hash, still counts
-            attributes.entrySet().removeIf(a -> a.getKey().endsWith("-Digest") && isDigestValueQuiet(a.getKey(), a.getValue()));
+            byte[] file = files.get(e.getKey());
+            attributes.entrySet().removeIf(a -> file != null && isDigestOf(a.getKey(), "-Digest", a.getValue(), file));
             if (!attributes.isEmpty()) {
                 sections.put(e.getKey(), attributes);
             }
@@ -125,6 +130,7 @@ public final class JarCompare {
         Set<String> blocks = new java.util.HashSet<>();
         Set<String> names = new java.util.HashSet<>();
         List<byte[]> sfContents = new ArrayList<>();
+        byte[] manifest = null;
         try (java.util.jar.JarFile jf = new java.util.jar.JarFile(jar.toFile(), true)) {
             for (Enumeration<java.util.jar.JarEntry> e = jf.entries(); e.hasMoreElements(); ) {
                 java.util.jar.JarEntry entry = e.nextElement();
@@ -143,8 +149,12 @@ public final class JarCompare {
                     continue;
                 }
                 names.add(entry.getName());
+                byte[] bytes;
                 try (InputStream in = jf.getInputStream(entry)) {
-                    in.readAllBytes(); // reading checks the file against the signature
+                    bytes = in.readAllBytes(); // reading checks the file against the signature
+                }
+                if (entry.getName().equals(MANIFEST)) {
+                    manifest = bytes;
                 }
                 if (entry.isDirectory() || entry.getName().equals(MANIFEST)) {
                     continue;
@@ -154,7 +164,7 @@ public final class JarCompare {
                 }
             }
             for (byte[] content : sfContents) {
-                if (!standardSignatureFile(content, names)) {
+                if (manifest == null || !standardSignatureFile(content, manifest, names)) {
                     return false;
                 }
             }
@@ -165,27 +175,51 @@ public final class JarCompare {
     }
 
     /**
-     * A .SF holding only what jarsigner writes, so nothing else can hide in it: Signature-Version,
-     * Created-By and manifest digests in the main section, and one section per file of the jar with
-     * only digest values (each the length of a real hash).
+     * A .SF holding exactly what jarsigner writes, so nothing else can hide in it. Checked on the
+     * text itself, not on a parsed map (which would keep only the last of repeated attributes):
+     * the main section has Signature-Version, Created-By and the manifest digests; every other
+     * section is one "Name" of a file of the jar plus digests. Every digest must be the real hash
+     * of what it covers (the whole manifest, its main section or the file's manifest section).
      */
-    private static boolean standardSignatureFile(byte[] content, Set<String> names) throws IOException {
-        Manifest sf = new Manifest(new ByteArrayInputStream(content));
-        for (Map.Entry<Object, Object> a : sf.getMainAttributes().entrySet()) {
-            String key = a.getKey().toString();
-            boolean digest = key.endsWith("-Digest-Manifest") || key.endsWith("-Digest-Manifest-Main-Attributes");
-            if (digest ? !isDigestValue(key, String.valueOf(a.getValue()))
-                    : !key.equals("Signature-Version") && !key.equals("Created-By")) {
+    private static boolean standardSignatureFile(byte[] content, byte[] manifest, Set<String> names) {
+        List<RawSection> sf = rawSections(content);
+        List<RawSection> mf = rawSections(manifest);
+        if (sf.isEmpty() || mf.isEmpty()) {
+            return false;
+        }
+        Map<String, byte[]> mfSections = new java.util.HashMap<>();
+        for (RawSection section : mf.subList(1, mf.size())) {
+            String first = section.lines().get(0);
+            if (first.startsWith("Name: ")) {
+                mfSections.put(first.substring(6), section.raw());
+            }
+        }
+        Set<String> keys = new java.util.HashSet<>();
+        for (String line : sf.get(0).lines()) {
+            String[] kv = keyValue(line);
+            if (kv == null || !keys.add(kv[0])) {
+                return false;
+            }
+            boolean ok = kv[0].equals("Signature-Version") || kv[0].equals("Created-By")
+                    || isDigestOf(kv[0], "-Digest-Manifest", kv[1], manifest)
+                    || isDigestOf(kv[0], "-Digest-Manifest-Main-Attributes", kv[1], mf.get(0).raw());
+            if (!ok) {
                 return false;
             }
         }
-        for (Map.Entry<String, Attributes> section : sf.getEntries().entrySet()) {
-            if (!names.contains(section.getKey()) || section.getValue().isEmpty()) {
+        Set<String> seen = new java.util.HashSet<>();
+        for (RawSection section : sf.subList(1, sf.size())) {
+            List<String> lines = section.lines();
+            String[] name = keyValue(lines.get(0));
+            if (name == null || !name[0].equals("Name") || !names.contains(name[1]) || !seen.add(name[1])
+                    || !mfSections.containsKey(name[1]) || lines.size() < 2) {
                 return false;
             }
-            for (Map.Entry<Object, Object> a : section.getValue().entrySet()) {
-                String key = a.getKey().toString();
-                if (!key.endsWith("-Digest") || !isDigestValue(key, String.valueOf(a.getValue()))) {
+            Set<String> digests = new java.util.HashSet<>();
+            for (String line : lines.subList(1, lines.size())) {
+                String[] kv = keyValue(line);
+                if (kv == null || !digests.add(kv[0])
+                        || !isDigestOf(kv[0], "-Digest", kv[1], mfSections.get(name[1]))) {
                     return false;
                 }
             }
@@ -193,24 +227,84 @@ public final class JarCompare {
         return true;
     }
 
-    private static boolean isDigestValueQuiet(String key, String value) {
-        try {
-            return isDigestValue(key, value);
-        } catch (IllegalArgumentException e) {
-            return false;
-        }
+    /** A manifest-style section: its logical lines (continuations joined) and its bytes with the blank line after it. */
+    private record RawSection(List<String> lines, byte[] raw) {
     }
 
-    /** A known digest name (SHA-1/SHA-256/384/512) whose value is a Base64 hash of the right length. */
-    private static boolean isDigestValue(String key, String value) {
-        String algorithm = key.substring(0, key.indexOf("-Digest"));
-        int length = switch (algorithm) {
-            case "SHA1", "SHA-1" -> 20;
-            case "SHA-256" -> 32;
-            case "SHA-384" -> 48;
-            case "SHA-512" -> 64;
-            default -> -1;
+    private static List<RawSection> rawSections(byte[] content) {
+        List<RawSection> sections = new ArrayList<>();
+        List<String> lines = new ArrayList<>();
+        StringBuilder current = null;
+        int start = 0;
+        int i = 0;
+        while (i < content.length) {
+            int lineStart = i;
+            while (i < content.length && content[i] != '\n' && content[i] != '\r') {
+                i++;
+            }
+            String line = new String(content, lineStart, i - lineStart, java.nio.charset.StandardCharsets.UTF_8);
+            if (i < content.length && content[i] == '\r') {
+                i++;
+            }
+            if (i < content.length && content[i] == '\n') {
+                i++;
+            }
+            if (line.isEmpty()) {
+                if (current != null) {
+                    lines.add(current.toString());
+                    current = null;
+                }
+                if (!lines.isEmpty()) {
+                    sections.add(new RawSection(lines, Arrays.copyOfRange(content, start, i)));
+                    lines = new ArrayList<>();
+                }
+                start = i;
+            } else if (line.startsWith(" ")) {
+                if (current == null) {
+                    throw new IllegalArgumentException("continuation without a line");
+                }
+                current.append(line, 1, line.length());
+            } else {
+                if (current != null) {
+                    lines.add(current.toString());
+                }
+                current = new StringBuilder(line);
+            }
+        }
+        if (current != null) {
+            lines.add(current.toString());
+        }
+        if (!lines.isEmpty()) {
+            sections.add(new RawSection(lines, Arrays.copyOfRange(content, start, content.length)));
+        }
+        return sections;
+    }
+
+    private static String[] keyValue(String line) {
+        int colon = line.indexOf(": ");
+        return colon <= 0 ? null : new String[] {line.substring(0, colon), line.substring(colon + 2)};
+    }
+
+    /** Whether {@code key} is {@code <algorithm><suffix>} and {@code value} is that hash of {@code data}, in Base64. */
+    private static boolean isDigestOf(String key, String suffix, String value, byte[] data) {
+        if (!key.endsWith(suffix)) {
+            return false;
+        }
+        String algorithm = switch (key.substring(0, key.length() - suffix.length())) {
+            case "SHA1", "SHA-1" -> "SHA-1";
+            case "SHA-256" -> "SHA-256";
+            case "SHA-384" -> "SHA-384";
+            case "SHA-512" -> "SHA-512";
+            default -> null;
         };
-        return length > 0 && java.util.Base64.getDecoder().decode(value.strip()).length == length;
+        if (algorithm == null) {
+            return false;
+        }
+        try {
+            byte[] expected = java.security.MessageDigest.getInstance(algorithm).digest(data);
+            return java.util.Base64.getEncoder().encodeToString(expected).equals(value.strip());
+        } catch (java.security.NoSuchAlgorithmException e) {
+            return false;
+        }
     }
 }
