@@ -18,7 +18,7 @@ Requirements for a release:
 
 - Build 42 or newer (ZombieBuddy does not load Java mods in Build 41). CI builds against the current public version of the game unless `game_branch` says otherwise.
 - No obfuscation.
-- No native libraries, no runtime code loading, no process execution. Calling operating system functions through the libraries the game already ships (e.g. LWJGL's `JNI` / `ObjCRuntime`) is allowed when every function, selector and argument is a constant in the code.
+- Native libraries, runtime code loading, process execution and the instrumentation API are hard findings of the scanner. They do not stop a release, but a review must explain why the mod needs each one, and until a review approves it, players' launchers treat the jar as suspicious (it loads only after a second confirmation). Calling operating system functions through the libraries the game already ships (e.g. LWJGL's `JNI` / `ObjCRuntime`) is fine when every function, selector and argument is a constant in the code.
 - Network access and file access outside `~/Zomboid` must be explained in the mod description and will be checked carefully in review.
 - Game classes from The Indie Stone are referenced at compile time only (`compileOnly`) and never bundled. CI fails a build whose jar contains game classes.
 
@@ -75,7 +75,7 @@ A review must state what was checked (full review or diff to the previous versio
 
 A Java mod runs with the player's rights. What a malicious one would do — steal files (Steam login, browser data, SSH keys), download and run code, change other mods or jars, mine crypto, open a multiplayer backdoor, destroy data — needs specific APIs. The review starts from them:
 
-1. **Trust the basis first.** `bcz inspect` must show the jar matching the source (CI's rebuild hash or the source check) and no hard findings. Then read the source, not the jar.
+1. **Trust the basis first.** `bcz inspect` must show the jar matching the source (CI's rebuild hash or the source check). Then read the source, not the jar. Hard findings (`!!`) are the most powerful APIs a mod can use: approve only if the notes explain why the mod needs each one and you followed what it does with it.
 2. **Know the claim.** Read the README / mod description and count the files and lines. The question for everything below: does the code do what it claims, and nothing else?
 3. **Filter by APIs outside the game.** List the imports of all files (`grep -h '^import' *.java | sort -u`) and look for files (`java.io`, `java.nio.file`), network (`java.net`), processes (`ProcessBuilder`, `Runtime.exec`), loading code (`ClassLoader`, `defineClass`, `System.load`), `Unsafe`, `ScriptEngine` and deserialization (`ObjectInputStream`). Also grep for fully qualified names (`java.net.` …), which need no import. Game classes (`zombie.*`) are not harmless by themselves: `ZomboidFileSystem` (paths, including saves and the game folder), `zombie.network.*` (sending to the server or clients), `LuaManager` (loading and running Lua), `SteamWorkshop` / `SteamUtils` (Workshop uploads, Steam) and `Core` / `GameWindow` (settings, saving) need the same look.
 4. **Find the entry points.** What runs by itself: `Main.main`, static initializers, the `@Patch` targets. What Lua can call: `@Exposer.LuaClass`, `@LuaMethod`. A path, URL or class name that comes from Lua is a warning sign.

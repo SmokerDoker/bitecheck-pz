@@ -299,7 +299,8 @@ public final class Main {
             }
             if (hard > 0) {
                 out.println();
-                out.println("Hard findings block this release. Soft findings must be explained in every review.");
+                out.println("Hard findings: players' launchers treat the jar as suspicious until a review explains each one. "
+                        + "Soft findings must be explained in every review too.");
             }
         } else {
             out.println(jar + ": " + report.classCount() + " classes, " + hard + " hard, " + soft + " soft findings");
