@@ -1,0 +1,9 @@
+# Build record written by CI. Signed by the registry key.
+mod = "zombiebuddy"
+version = "2.3.4"
+method = "workshop"
+release_sha256 = "4d857c6a5e4de713e7b22eed3fb26ef2023cf6ff8d4bc63dfa1ff97b373a9d08"
+artifact_paths = ["mods/ZombieBuddy/libs/ZombieBuddy.jar"]
+artifact_sha256 = ["eb79b9876332010733a8e0d7ce4fe0377846059a9e28859029e2a0fb449f6cf2"]
+built_at = "2026-11-24T10:39:01Z"
+builders = ["github-ubuntu-24.04", "github-ubuntu-22.04"]
