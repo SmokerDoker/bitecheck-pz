@@ -438,13 +438,17 @@ public final class SelfTest {
             List<String> d = JarCompare.differences(built, tampered);
             expect(d.contains("a/A.class: differs"), true);
             expect(d.stream().anyMatch(s -> s.startsWith("META-INF/TEST.SF")), true);
-            // in the manifest only real hash values are left out; data under a digest name still counts
-            String hash = java.util.Base64.getEncoder().encodeToString(new byte[32]);
-            String payload = java.util.Base64.getEncoder().encodeToString(new byte[200]);
+            // in the manifest only the real hash of the file is left out; anything else under a digest name counts
+            String hash = java.util.Base64.getEncoder().encodeToString(
+                    java.security.MessageDigest.getInstance("SHA-256").digest("A".getBytes(StandardCharsets.UTF_8)));
+            String payload = java.util.Base64.getEncoder().encodeToString(new byte[32]);
             expect(JarCompare.differences(built, zipOf(Map.of("a/A.class", "A", "a/B.class", "B",
                     m, "Manifest-Version: 1.0\n\nName: a/A.class\nSHA-256-Digest: " + hash + "\n"), 0L)), List.of());
             expect(JarCompare.differences(built, zipOf(Map.of("a/A.class", "A", "a/B.class", "B",
                     m, "Manifest-Version: 1.0\n\nName: a/A.class\nSHA-256-Digest: " + payload + "\n"), 0L)),
+                    List.of(m + ": attributes differ (beyond build tool and JDK)"));
+            expect(JarCompare.differences(built, zipOf(Map.of("a/A.class", "A", "a/B.class", "B",
+                    m, "Manifest-Version: 1.0\n\nName: no/such.class\nSHA-256-Digest: " + hash + "\n"), 0L)),
                     List.of(m + ": attributes differ (beyond build tool and JDK)"));
             expect(JarCompare.differences(built, zipOf(Map.of("a/A.class", "A", "a/B.class", "B",
                     m, "Manifest-Version: 1.0\n\nName: a/A.class\nX-Data-Digest: " + hash + "\n"), 0L)),
