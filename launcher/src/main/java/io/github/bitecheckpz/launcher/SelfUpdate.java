@@ -139,6 +139,23 @@ public final class SelfUpdate {
 
     static final String SYSTEM_SUFFIX = "-system.msi";
 
+    /**
+     * The installer's hash as the signed checksums next to it list it, checked again right before
+     * installing. Never the hash of the file itself: the download sits in the player's folder, and
+     * on a Steam start the game runs between BiteCheck's check and the installation.
+     */
+    static String signedHash(Path installer, Keys.PublicKeyInfo releaseKey) throws IOException {
+        Path sums = installer.resolveSibling(SUMS);
+        Signatures.Check sig = Signatures.verify(sums, releaseKey);
+        if (sig != Signatures.Check.VALID) {
+            throw new IOException("The release checksums are not signed by the BiteCheck release key ("
+                    + sig.description() + "). Nothing was installed.");
+        }
+        String name = installer.getFileName().toString();
+        return expectedHash(Files.readAllLines(sums, StandardCharsets.UTF_8), name)
+                .orElseThrow(() -> new IOException(name + " is not listed in the signed checksums. Nothing was installed."));
+    }
+
     /** Throws unless the checksums are signed with the release key and list the installer's hash. */
     static void check(Path sums, Path installer, Keys.PublicKeyInfo releaseKey) throws IOException {
         Signatures.Check sig = Signatures.verify(sums, releaseKey);
@@ -188,7 +205,9 @@ public final class SelfUpdate {
                 if (installer.getFileName().toString().endsWith(SYSTEM_SUFFIX)) {
                     // Into Program Files: Windows asks for administrator rights once (see elevatedScript).
                     String outer = "$inner = '" + java.util.Base64.getEncoder().encodeToString(
-                            elevatedScript(pid, installer.toString(), Hashing.sha256Hex(installer), repair)
+                            elevatedScript(pid, installer.toString(), signedHash(installer,
+                                    IndexClient.releaseKey(Config.empty()).orElseThrow(
+                                            () -> new IOException("No release key is built in."))), repair)
                                     .getBytes(StandardCharsets.UTF_16LE)) + "'\n"
                             + "Start-Process powershell.exe -Verb RunAs -Wait -WindowStyle Hidden -ArgumentList "
                             + "'-NoProfile','-ExecutionPolicy','Bypass','-EncodedCommand',$inner\n"

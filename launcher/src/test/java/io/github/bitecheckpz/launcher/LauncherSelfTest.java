@@ -115,6 +115,8 @@ public final class LauncherSelfTest {
             SelfUpdate.check(sums, installer, pub);
             Files.writeString(installer, "tampered");
             expectThrows(() -> SelfUpdate.check(sums, installer, pub));
+            // the elevated install gets the hash from the signed checksums, never from the (swapped) file
+            expect(SelfUpdate.signedHash(installer, pub), Hashing.sha256Hex("installer".getBytes(StandardCharsets.UTF_8)));
             Path older = dir.resolve("BiteCheck-0.1.4-windows-x64.msi");
             Files.writeString(older, "installer");
             expectThrows(() -> SelfUpdate.check(sums, older, pub)); // not listed under this name
