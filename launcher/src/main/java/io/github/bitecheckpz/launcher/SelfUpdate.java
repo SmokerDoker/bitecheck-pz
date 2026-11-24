@@ -260,18 +260,19 @@ public final class SelfUpdate {
 
     /**
      * The part that runs with administrator rights: waits for BiteCheck (pid) to exit, copies the
-     * installer into a folder only administrators can change ({@code %ProgramData%\\BiteCheck\\updates},
-     * a new random file name), checks the copy's SHA-256 there and only then installs it. Nothing a
-     * program with the player's rights does to the downloaded file after BiteCheck checked it can
+     * installer into a new folder with a random name directly in {@code %ProgramFiles%}, where only
+     * administrators can create anything (so no one can have made that folder beforehand, and it
+     * inherits the admin-only rights), checks the copy against the signed SHA-256 there and only
+     * then installs it. Nothing a program with the player's rights does to the downloaded file can
      * get into the installation. Passed to PowerShell directly, never written to a file.
      */
     static String elevatedScript(String pid, String msi, String sha256, boolean repair) {
         return String.join("\n",
                 "$ErrorActionPreference = 'Stop'",
                 "Wait-Process -Id " + Long.parseLong(pid) + " -ErrorAction SilentlyContinue",
-                "$dir = Join-Path $env:ProgramData 'BiteCheck\\updates'",
-                "New-Item -ItemType Directory -Force -Path $dir | Out-Null",
-                "$target = Join-Path $dir ([guid]::NewGuid().ToString() + '.msi')",
+                "$dir = Join-Path $env:ProgramFiles ('BiteCheck-update-' + [guid]::NewGuid().ToString())",
+                "New-Item -ItemType Directory -Path $dir | Out-Null", // fails if it exists: never reuse a folder
+                "$target = Join-Path $dir 'BiteCheck.msi'",
                 "Copy-Item -LiteralPath '" + msi.replace("'", "''") + "' -Destination $target",
                 "try {",
                 "  if ((Get-FileHash -Algorithm SHA256 -LiteralPath $target).Hash -ne '" + sha256.toUpperCase(Locale.ROOT)
@@ -280,7 +281,7 @@ public final class SelfUpdate {
                         + "', ('\"' + $target + '\"'), '/qn', '/norestart')",
                 "  exit $p.ExitCode",
                 "} finally {",
-                "  Remove-Item -LiteralPath $target -Force -ErrorAction SilentlyContinue",
+                "  Remove-Item -LiteralPath $dir -Recurse -Force -ErrorAction SilentlyContinue",
                 "}",
                 "");
     }

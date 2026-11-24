@@ -383,7 +383,10 @@ public final class LauncherSelfTest {
             String script = SelfUpdate.elevatedScript("42", "C:\\Users\\o'neil\\BiteCheck.msi", "ab".repeat(32), false);
             expect(script.contains("Wait-Process -Id 42"), true);
             expect(script.contains("'C:\\Users\\o''neil\\BiteCheck.msi'"), true);
-            expect(script.contains("Join-Path $env:ProgramData 'BiteCheck\\updates'"), true);
+            // a new folder in Program Files (only administrators can create one there), never reused
+            expect(script.contains("Join-Path $env:ProgramFiles ('BiteCheck-update-' + [guid]::NewGuid().ToString())"), true);
+            expect(script.contains("New-Item -ItemType Directory -Path $dir |"), true);
+            expect(script.contains("-Force -Path $dir"), false);
             expect(script.indexOf("Get-FileHash") < script.indexOf("msiexec"), true);
             expect(script.contains("-ne '" + "AB".repeat(32) + "') { exit 1 }"), true);
             expect(SelfUpdate.elevatedScript("1", "x", h, true).contains("@('/fa'"), true);
