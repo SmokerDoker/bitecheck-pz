@@ -25,10 +25,13 @@ import java.util.zip.ZipFile;
  * may differ; anything that changes loading (Class-Path, agents, per-entry sections, ...) must be
  * the same. Other spellings of the manifest are compared like any file.
  *
- * <p>A jar signature (jarsigner) is left out on both sides: the signature block files directly in
- * META-INF ({@code *.SF}, {@code *.RSA}, {@code *.DSA}, {@code *.EC}) and the per-entry digest
- * attributes in the manifest. A rebuild can never reproduce the author's signature, and a signature
- * does not change what the code does; every signed file itself is still compared byte for byte.
+ * <p>A jar signature (jarsigner) is left out: the signature files directly in META-INF
+ * ({@code *.SF} with its block file {@code *.RSA}, {@code *.DSA} or {@code *.EC}) and the per-entry
+ * digest attributes in the manifest. A rebuild can never reproduce the author's signature, and a
+ * signature does not change what the code does; every signed file itself is still compared byte for
+ * byte. The signature files are only left out if they really are a signature of this jar (Java
+ * verifies every file against them, each .SF has its block file, a few signers at most, limited
+ * size); otherwise they count like any other file, so nothing can hide under such a name.
  */
 public final class JarCompare {
 
@@ -36,7 +39,10 @@ public final class JarCompare {
     private static final Set<String> BUILD_INFO =
             Set.of("Manifest-Version", "Created-By", "Built-By", "Build-Jdk", "Build-Jdk-Spec");
     private static final java.util.regex.Pattern SIGNATURE_FILE =
-            java.util.regex.Pattern.compile("META-INF/[^/]+\\.(SF|RSA|DSA|EC)");
+            java.util.regex.Pattern.compile("META-INF/([^/]+)\\.(SF|RSA|DSA|EC)");
+    private static final int MAX_SIGNERS = 4;
+    private static final long MAX_SF_BYTES = 32L * 1024 * 1024;
+    private static final long MAX_BLOCK_BYTES = 64L * 1024;
 
     private JarCompare() {
     }
@@ -87,6 +93,7 @@ public final class JarCompare {
     }
 
     private static Map<String, byte[]> files(Path jar) throws IOException {
+        boolean signed = validSignature(jar);
         Map<String, byte[]> files = new TreeMap<>();
         try (ZipFile zip = new ZipFile(jar.toFile())) {
             for (Enumeration<? extends ZipEntry> e = zip.entries(); e.hasMoreElements(); ) {
@@ -95,7 +102,8 @@ public final class JarCompare {
                 try (InputStream in = zip.getInputStream(entry)) {
                     content = in.readAllBytes();
                 }
-                if ((entry.isDirectory() && content.length == 0) || SIGNATURE_FILE.matcher(entry.getName()).matches()) {
+                if ((entry.isDirectory() && content.length == 0)
+                        || (signed && SIGNATURE_FILE.matcher(entry.getName()).matches())) {
                     continue;
                 }
                 if (files.put(entry.getName(), content) != null) {
@@ -104,5 +112,41 @@ public final class JarCompare {
             }
         }
         return files;
+    }
+
+    /**
+     * Whether the jar carries a jarsigner signature that Java verifies for every file: each .SF
+     * has its block file and the other way round, at most {@link #MAX_SIGNERS} signers, and every
+     * file outside the signature itself is signed and unchanged.
+     */
+    static boolean validSignature(Path jar) {
+        Set<String> sf = new java.util.HashSet<>();
+        Set<String> blocks = new java.util.HashSet<>();
+        try (java.util.jar.JarFile jf = new java.util.jar.JarFile(jar.toFile(), true)) {
+            for (Enumeration<java.util.jar.JarEntry> e = jf.entries(); e.hasMoreElements(); ) {
+                java.util.jar.JarEntry entry = e.nextElement();
+                java.util.regex.Matcher m = SIGNATURE_FILE.matcher(entry.getName());
+                if (m.matches()) {
+                    boolean isSf = m.group(2).equals("SF");
+                    if (entry.getSize() < 0 || entry.getSize() > (isSf ? MAX_SF_BYTES : MAX_BLOCK_BYTES)
+                            || !(isSf ? sf : blocks).add(m.group(1))) {
+                        return false;
+                    }
+                    continue;
+                }
+                try (InputStream in = jf.getInputStream(entry)) {
+                    in.readAllBytes(); // reading checks the file against the signature
+                }
+                if (entry.isDirectory() || entry.getName().equals(MANIFEST)) {
+                    continue;
+                }
+                if (entry.getCodeSigners() == null) {
+                    return false;
+                }
+            }
+        } catch (IOException | SecurityException e) {
+            return false;
+        }
+        return !sf.isEmpty() && sf.size() <= MAX_SIGNERS && sf.equals(blocks);
     }
 }

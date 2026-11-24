@@ -417,18 +417,32 @@ public final class SelfTest {
             expect(JarCompare.differences(built, classPath),
                     List.of(m + ": attributes differ (beyond build tool and JDK)"));
             expect(JarCompare.differences(built, otherCase), List.of("meta-inf/manifest.mf: not built from the source"));
-            // the author's jarsigner signature is left out; the signed files themselves still count
-            Path signed = zipOf(Map.of("a/A.class", "A", "a/B.class", "B",
-                    m, "Manifest-Version: 1.0\n\nName: a/A.class\nSHA-256-Digest: abc=\n",
-                    "META-INF/ME_ZED_0.SF", "sig", "META-INF/ME_ZED_0.RSA", "block"), 0L);
-            expect(JarCompare.differences(built, signed), List.of());
-            Path signedChanged = zipOf(Map.of("a/A.class", "A2", "a/B.class", "B",
-                    m, "Manifest-Version: 1.0\n\nName: a/A.class\nSHA-256-Digest: abc=\n",
-                    "META-INF/ME_ZED_0.SF", "sig"), 0L);
-            expect(JarCompare.differences(built, signedChanged), List.of("a/A.class: differs"));
             Path sealed = zipOf(Map.of("a/A.class", "A", "a/B.class", "B",
                     m, "Manifest-Version: 1.0\n\nName: a/\nSealed: true\nSHA-256-Digest: abc=\n"), 0L);
             expect(JarCompare.differences(built, sealed), List.of(m + ": attributes differ (beyond build tool and JDK)"));
+        });
+        run("jar-compare: a real jarsigner signature is left out, a fake one counts", () -> {
+            String m = "META-INF/MANIFEST.MF";
+            Path built = zipOf(Map.of("a/A.class", "A", "a/B.class", "B", m, "Manifest-Version: 1.0\n"), 0L);
+            Path signed = signed(built);
+            expect(JarCompare.validSignature(signed), true);
+            expect(JarCompare.differences(built, signed), List.of());
+            // something hidden under a signature file name: the signature no longer counts as one
+            Path smuggled = withEntries(signed, Map.of("META-INF/PAYLOAD.SF", "not a signature"));
+            expect(JarCompare.validSignature(smuggled), false);
+            expect(JarCompare.differences(built, smuggled).contains("META-INF/PAYLOAD.SF: not built from the source"),
+                    true);
+            // a signed file changed after signing: Java's check fails, so the signature counts too
+            Path tampered = withEntries(signed, Map.of("a/A.class", "A2"));
+            expect(JarCompare.validSignature(tampered), false);
+            List<String> d = JarCompare.differences(built, tampered);
+            expect(d.contains("a/A.class: differs"), true);
+            expect(d.stream().anyMatch(s -> s.startsWith("META-INF/TEST.SF")), true);
+            // fake signature files that Java cannot verify count like any other file
+            Path fake = zipOf(Map.of("a/A.class", "A", "a/B.class", "B", m, "Manifest-Version: 1.0\n",
+                    "META-INF/ME_ZED_0.SF", "sig", "META-INF/ME_ZED_0.RSA", "block"), 0L);
+            expect(JarCompare.differences(built, fake), List.of("META-INF/ME_ZED_0.RSA: not built from the source",
+                    "META-INF/ME_ZED_0.SF: not built from the source"));
         });
         run("workshop release: lint, build record of the Workshop jar, VERIFIED", () -> {
             Fixture f = Fixture.create();
@@ -604,6 +618,60 @@ public final class SelfTest {
             }
         }
         return jar;
+    }
+
+    /** Signs a copy of the jar with a new key (keytool from this JDK, then the JDK's JarSigner API). */
+    private static Path signed(Path jar) throws Exception {
+        Path dir = Files.createTempDirectory("bcz-sign");
+        Path store = dir.resolve("test.p12");
+        char[] pass = "changeit".toCharArray();
+        Path keytool = Path.of(System.getProperty("java.home"), "bin",
+                System.getProperty("os.name", "").toLowerCase(java.util.Locale.ROOT).contains("win") ? "keytool.exe" : "keytool");
+        Process p = new ProcessBuilder(keytool.toString(), "-genkeypair", "-keystore", store.toString(),
+                "-storetype", "PKCS12", "-storepass", "changeit", "-keypass", "changeit", "-alias", "test",
+                "-keyalg", "EC", "-groupname", "secp256r1", "-dname", "CN=Test", "-validity", "2")
+                .redirectErrorStream(true).start();
+        String log = new String(p.getInputStream().readAllBytes(), StandardCharsets.UTF_8);
+        if (p.waitFor() != 0) {
+            throw new IOException("keytool failed: " + log);
+        }
+        java.security.KeyStore ks = java.security.KeyStore.getInstance(store.toFile(), pass);
+        var key = (java.security.KeyStore.PrivateKeyEntry) ks.getEntry("test",
+                new java.security.KeyStore.PasswordProtection(pass));
+        var signer = new jdk.security.jarsigner.JarSigner.Builder(key).signerName("TEST").build();
+        Path out = dir.resolve("signed.jar");
+        try (var zip = new java.util.zip.ZipFile(jar.toFile()); var os = Files.newOutputStream(out)) {
+            signer.sign(zip, os);
+        }
+        return out;
+    }
+
+    /** A copy of the jar with some entries replaced or added. */
+    private static Path withEntries(Path jar, Map<String, String> replace) throws IOException {
+        Path out = Files.createTempFile("bcz-changed", ".jar");
+        try (var zip = new java.util.zip.ZipFile(jar.toFile());
+                var os = new java.util.zip.ZipOutputStream(Files.newOutputStream(out))) {
+            for (var e = zip.entries(); e.hasMoreElements(); ) {
+                var entry = e.nextElement();
+                os.putNextEntry(new java.util.zip.ZipEntry(entry.getName()));
+                if (replace.containsKey(entry.getName())) {
+                    os.write(replace.get(entry.getName()).getBytes(StandardCharsets.UTF_8));
+                } else {
+                    try (var in = zip.getInputStream(entry)) {
+                        in.transferTo(os);
+                    }
+                }
+                os.closeEntry();
+            }
+            for (var r : replace.entrySet()) {
+                if (zip.getEntry(r.getKey()) == null) {
+                    os.putNextEntry(new java.util.zip.ZipEntry(r.getKey()));
+                    os.write(r.getValue().getBytes(StandardCharsets.UTF_8));
+                    os.closeEntry();
+                }
+            }
+        }
+        return out;
     }
 
     /** Packs one fixture class from the test classpath into a temporary jar. */
