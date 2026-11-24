@@ -24,11 +24,14 @@ public final class Session {
     public final List<Planner.Row> rows;
     public final List<String> notes = new ArrayList<>();
     public final Instant now;
+    /** When Steam last updated each Workshop item, for the update hints. */
+    public final Map<String, String> steamUpdated;
     /** A newer BiteCheck release, if there is one (see {@link UpdateCheck}). */
     public Optional<String> newerVersion = Optional.empty();
 
     private Session(Platform platform, Config config, LauncherState state, ZombieBuddyApprovals approvals,
-            List<JavaMods.JavaMod> mods, IndexClient.Outcome index, List<Planner.Row> rows, Instant now) {
+            List<JavaMods.JavaMod> mods, IndexClient.Outcome index, List<Planner.Row> rows, Instant now,
+            Map<String, String> steamUpdated) {
         this.platform = platform;
         this.config = config;
         this.state = state;
@@ -37,6 +40,7 @@ public final class Session {
         this.index = index;
         this.rows = rows;
         this.now = now;
+        this.steamUpdated = steamUpdated;
     }
 
     public static Session run(Path biteCheckDir) throws IOException {
@@ -56,8 +60,9 @@ public final class Session {
         IndexClient.Outcome index = new IndexClient(url, key, IndexClient.timestampKey(config),
                 biteCheckDir.resolve("cache"), state).fetch(now);
         Optional<Index> usable = index.index();
-        List<Planner.Row> rows = Planner.plan(mods, usable, now, approvals, state);
-        Session session = new Session(platform, config, state, approvals, mods, index, rows, now);
+        Map<String, String> steamUpdated = platform.workshopUpdateTimes();
+        List<Planner.Row> rows = Planner.plan(mods, usable, now, approvals, state, steamUpdated);
+        Session session = new Session(platform, config, state, approvals, mods, index, rows, now, steamUpdated);
         session.notes.addAll(index.notes());
         if (index.stale(now)) {
             session.notes.add("The registry index was last confirmed more than " + Index.MAX_AGE.toDays()
@@ -73,16 +78,24 @@ public final class Session {
 
     /** Writes the planned decisions. Returns the number of changed jars. */
     public int apply() throws IOException {
-        int changes = Planner.apply(rows, approvals, state);
+        int changes = Planner.apply(rows, approvals, state, steamUpdated);
+        java.util.Set<String> allowed = new java.util.HashSet<>();
+        rows.stream().filter(Planner::trusted).forEach(r -> allowed.add(r.jar().sha256()));
+        notes.addAll(ZombieBuddyConfig.secure(platform.zombieBuddyDir(), allowed));
         approvals.save();
         state.save();
         return changes;
     }
 
+    /** ZombieBuddy jars the game must not start with yet (see {@link Planner.Row#stopsGame()}). */
+    public List<Planner.Row> startStoppers() {
+        return rows.stream().filter(Planner.Row::stopsGame).toList();
+    }
+
     /** Re-plans after the player changed something (e.g. allowed a flagged mod). */
     public Session replan() {
         Session s = new Session(platform, config, state, approvals, mods, index,
-                Planner.plan(mods, index.index(), now, approvals, state), now);
+                Planner.plan(mods, index.index(), now, approvals, state, steamUpdated), now, steamUpdated);
         s.notes.addAll(notes);
         s.newerVersion = newerVersion;
         return s;

@@ -11,6 +11,7 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.Optional;
 import java.util.regex.Pattern;
 import java.util.stream.Stream;
 
@@ -26,8 +27,17 @@ import java.util.stream.Stream;
  */
 public final class JavaMods {
 
-    /** ZombieBuddy itself is loaded as an agent, not as a mod; the user installed it on purpose. */
+    /**
+     * ZombieBuddy's own mod folder only holds the copy its installer starts from; the game loads
+     * the jar in the game folder (see {@link #zombieBuddy}), so the mod folder is skipped.
+     */
     static final String ZOMBIE_BUDDY_PACKAGE = "me.zed_0xff.zombie_buddy";
+
+    /** {@link JavaMod#source()} of ZombieBuddy's jar in the game folder, the mod loader itself. */
+    static final String LOADER_SOURCE = "game folder";
+    static final String ZOMBIE_BUDDY_JAR = "ZombieBuddy.jar";
+    /** A ZombieBuddy update waiting to replace the jar when the game starts (after BiteCheck ran). */
+    static final String PENDING_SUFFIX = ".new";
 
     private static final int MAX_DEPTH = 8;
     private static final Pattern VERSION_DIR = Pattern.compile("\\d{1,9}(\\.\\d+)*");
@@ -37,6 +47,50 @@ public final class JavaMods {
     }
 
     public record JavaMod(String id, String name, Path folder, String workshopId, String source, List<Jar> jars) {
+
+        /** ZombieBuddy, which loads every other Java mod: the game does not start without the player's OK. */
+        public boolean isLoader() {
+            return LOADER_SOURCE.equals(source);
+        }
+    }
+
+    /**
+     * ZombieBuddy as the game loads it: {@code ZombieBuddy.jar} in the folder the game runs in
+     * ({@code -javaagent:ZombieBuddy.jar}, or {@code zbNative} on Windows), plus a waiting
+     * {@code ZombieBuddy.jar.new}, which {@code zbNative} puts in place when the game starts.
+     */
+    public static Optional<JavaMod> zombieBuddy(Platform platform) throws IOException {
+        Optional<Path> game = platform.gameDir();
+        if (game.isEmpty()) {
+            return Optional.empty();
+        }
+        Path g = game.get();
+        for (Path dir : List.of(g, g.resolve("projectzomboid"), g.resolve("java"),
+                g.resolve("Project Zomboid.app/Contents/Java"))) {
+            Path jar = dir.resolve(ZOMBIE_BUDDY_JAR);
+            Path pending = dir.resolve(ZOMBIE_BUDDY_JAR + PENDING_SUFFIX);
+            List<Jar> jars = new ArrayList<>();
+            for (Path p : List.of(jar, pending)) {
+                if (Files.isRegularFile(p)) {
+                    jars.add(new Jar(p, Hashing.sha256Hex(p), true));
+                }
+            }
+            if (!jars.isEmpty()) {
+                return Optional.of(new JavaMod("ZombieBuddy", "ZombieBuddy", dir, null, LOADER_SOURCE, jars));
+            }
+        }
+        return Optional.empty();
+    }
+
+    /** The jar's {@code Implementation-Version}, or null. */
+    static String version(Path jar) {
+        try (java.util.jar.JarFile f = new java.util.jar.JarFile(jar.toFile())) {
+            java.util.jar.Manifest m = f.getManifest();
+            String v = m == null ? null : m.getMainAttributes().getValue("Implementation-Version");
+            return v == null || v.isBlank() ? null : v.strip();
+        } catch (IOException | RuntimeException e) {
+            return null;
+        }
     }
 
     private JavaMods() {
@@ -58,6 +112,10 @@ public final class JavaMods {
             }
         }
         Map<Path, JavaMod> mods = new LinkedHashMap<>();
+        Optional<JavaMod> loader = zombieBuddy(platform);
+        if (loader.isPresent()) {
+            mods.put(loader.get().folder().toAbsolutePath().normalize(), loader.get());
+        }
         for (Root root : roots) {
             if (!Files.isDirectory(root.dir)) {
                 continue;

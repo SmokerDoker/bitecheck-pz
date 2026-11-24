@@ -158,6 +158,48 @@ public final class Platform {
         return Optional.empty();
     }
 
+    /**
+     * When Steam last updated each installed Workshop item (item id to Unix time, as Steam writes it
+     * in {@code appworkshop_108600.acf}). Lets BiteCheck tell a Workshop update from a jar that
+     * changed without one.
+     */
+    public java.util.Map<String, String> workshopUpdateTimes() {
+        java.util.Map<String, String> times = new java.util.HashMap<>();
+        for (Path lib : steamLibraries()) {
+            Path acf = lib.resolve("steamapps/workshop/appworkshop_" + PZ_APP_ID + ".acf");
+            try {
+                if (Files.isRegularFile(acf)) {
+                    parseWorkshopUpdateTimes(Files.readString(acf, StandardCharsets.UTF_8))
+                            .forEach(times::putIfAbsent);
+                }
+            } catch (IOException | RuntimeException e) {
+                // unreadable manifest: no update information for these items
+            }
+        }
+        return times;
+    }
+
+    private static final Pattern ACF_ITEM = Pattern.compile("\"(\\d+)\"\\s*\\{([^{}]*)\\}");
+    private static final Pattern ACF_UPDATED = Pattern.compile("\"timeupdated\"\\s+\"(\\d+)\"");
+
+    /** Reads the installed items only (WorkshopItemsInstalled), not the newest versions Steam knows of. */
+    static java.util.Map<String, String> parseWorkshopUpdateTimes(String acf) {
+        java.util.Map<String, String> times = new java.util.HashMap<>();
+        int start = acf.indexOf("\"WorkshopItemsInstalled\"");
+        if (start < 0) {
+            return times;
+        }
+        int end = acf.indexOf("\"WorkshopItemDetails\"", start);
+        Matcher items = ACF_ITEM.matcher(acf.substring(start, end < 0 ? acf.length() : end));
+        while (items.find()) {
+            Matcher updated = ACF_UPDATED.matcher(items.group(2));
+            if (updated.find()) {
+                times.putIfAbsent(items.group(1), updated.group(1));
+            }
+        }
+        return times;
+    }
+
     /** Steam Workshop content folders for Project Zomboid. */
     public List<Path> workshopContentDirs() {
         List<Path> result = new ArrayList<>();

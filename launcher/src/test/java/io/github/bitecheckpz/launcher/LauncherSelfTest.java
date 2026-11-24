@@ -163,16 +163,17 @@ public final class LauncherSelfTest {
             expect(preview.contains("install\t<random id, new every month>"), true);
             expect(preview.contains("jar\t" + "ab".repeat(32) + "\t\tLocal\t1"), true);
         });
-        run("flow: verified allowed, unverified untouched, blocked denied", () -> {
+        run("flow: verified allowed, unverified off until the player answers, blocked denied", () -> {
             World w = World.create();
             Session s = w.session();
             expect(status(s, "good.jar"), Verifier.Status.VERIFIED);
             expect(status(s, "unknown.jar"), Verifier.Status.UNVERIFIED);
+            expect(row(s, "unknown.jar").undecided(), true);
             expect(status(s, "evil.jar"), Verifier.Status.BLOCKED);
             s.apply();
             ZombieBuddyApprovals a = ZombieBuddyApprovals.load(w.zb);
             expect(a.decision(w.sha("good.jar")), Boolean.TRUE);
-            expect(a.decision(w.sha("unknown.jar")), null);
+            expect(a.decision(w.sha("unknown.jar")), Boolean.FALSE); // ZombieBuddy has nothing to ask
             expect(a.decision(w.sha("evil.jar")), Boolean.FALSE);
             expect(a.decision("ff".repeat(32)), Boolean.TRUE); // the player's own earlier decision survives
         });
@@ -195,14 +196,181 @@ public final class LauncherSelfTest {
             expect(ZombieBuddyApprovals.load(w.zb).decision(Hashing.sha256Hex(good.resolve("media/java/bad.jar"))),
                     Boolean.FALSE);
         });
+        run("window: a mod with several jars is one line, showing its most serious jar", () -> {
+            World w = World.create();
+            Path good = w.modsDir.resolve("Good");
+            Files.createDirectories(good.resolve("media/java"));
+            Files.writeString(good.resolve("media/java/bad.jar"), "blocked copy");
+            w.publishIndex(Instant.now().plusSeconds(60), Map.of("verified", w.sha("good.jar"),
+                    "blocked", Hashing.sha256Hex(good.resolve("media/java/bad.jar"))));
+            List<LauncherWindow.ModLine> lines = LauncherWindow.ModLine.group(w.session().rows).stream()
+                    .filter(l -> l.mod().folder().equals(good)).toList();
+            expect(lines.size(), 1);
+            expect(lines.get(0).rows().size(), 2);
+            expect(lines.get(0).shown().status(), Verifier.Status.BLOCKED);
+            expect(lines.get(0).tooltip().contains(":/") || lines.get(0).tooltip().contains(":\\"), false);
+        });
         run("flow: approval is taken back when a mod loses verification", () -> {
             World w = World.create();
             w.session().apply();
             w.publishIndex(Instant.now().plusSeconds(60), Map.of());
             Session s = w.session();
-            expect(action(s, "good.jar"), Planner.Action.ASK_IN_GAME);
+            expect(action(s, "good.jar"), Planner.Action.DENY);
+            expect(row(s, "good.jar").undecided(), true);
             s.apply();
-            expect(ZombieBuddyApprovals.load(w.zb).decision(w.sha("good.jar")), null);
+            expect(ZombieBuddyApprovals.load(w.zb).decision(w.sha("good.jar")), Boolean.FALSE);
+        });
+        run("answers: yes allows the mod, no keeps it off and is not asked again", () -> {
+            World w = World.create();
+            Session s = w.session();
+            expect(StartGate.questions(s).stream().anyMatch(q -> q.mod().id().equals("Unknown")), true);
+            s.state.allowedAnyway().put(w.sha("unknown.jar"), "test");
+            s.state.refused().put(w.sha("shady.jar"), "test");
+            s.replan().apply();
+            Session again = w.session();
+            expect(action(again, "unknown.jar"), Planner.Action.NONE);
+            expect(row(again, "unknown.jar").undecided(), false);
+            expect(row(again, "shady.jar").refused(), true);
+            expect(row(again, "shady.jar").undecided(), false);
+            expect(StartGate.questions(again).stream().anyMatch(q -> q.mod().id().equals("Unknown")
+                    || q.mod().id().equals("Shady")), false);
+            ZombieBuddyApprovals a = ZombieBuddyApprovals.load(w.zb);
+            expect(a.decision(w.sha("unknown.jar")), Boolean.TRUE);
+            expect(a.decision(w.sha("shady.jar")), Boolean.FALSE);
+            // an approval someone else wrote into ZombieBuddy's file does not count
+            a.set("Other", null, w.sha("unknown.jar"), true);
+            again.state.allowedAnyway().remove(w.sha("unknown.jar"));
+            expect(row(again.replan(), "unknown.jar").undecided(), true);
+            expect(action(again.replan(), "unknown.jar"), Planner.Action.DENY);
+        });
+        run("zombiebuddy: the jar in the game folder is checked like any mod and stops the start", () -> {
+            World w = World.create();
+            Path game = w.root.resolve("game");
+            Files.createDirectories(game);
+            Files.writeString(w.biteCheck.resolve("config.toml"), Files.readString(w.biteCheck.resolve("config.toml"))
+                    + "game_dir = " + io.github.bitecheckpz.core.Toml.quote(game.toString()) + "\n");
+            w.mod(game, "ZBTmp", "ZombieBuddy.jar", "zb loader");
+            Path zb = game.resolve("ZombieBuddy.jar");
+            Files.move(w.jars.get("ZombieBuddy.jar"), zb);
+            w.jars.put("ZombieBuddy.jar", zb);
+            Session s = w.session();
+            Planner.Row loader = row(s, "ZombieBuddy.jar");
+            expect(loader.mod().isLoader(), true);
+            expect(loader.status(), Verifier.Status.UNVERIFIED);
+            expect(loader.stopsGame(), true);
+            expect(StartGate.questions(s).get(0).mod().isLoader(), true); // asked first
+            s.apply();
+            expect(ZombieBuddyApprovals.load(w.zb).decision(w.sha("ZombieBuddy.jar")), null); // not its own approval
+            s.state.allowedAnyway().put(w.sha("ZombieBuddy.jar"), "test");
+            expect(row(s.replan(), "ZombieBuddy.jar").stopsGame(), false);
+            // a waiting update (zbNative puts it in place at the start) is checked too
+            Files.writeString(game.resolve("ZombieBuddy.jar.new"), "update");
+            Session withUpdate = w.session();
+            expect(withUpdate.rows.stream().anyMatch(r -> r.jar().path().getFileName().toString()
+                    .equals("ZombieBuddy.jar.new") && r.stopsGame()), true);
+            // blocked: never allowed, the game does not start
+            w.publishIndex(Instant.now().plusSeconds(60), Map.of("blocked", w.sha("ZombieBuddy.jar")));
+            Session blocked = w.session();
+            expect(row(blocked, "ZombieBuddy.jar").stopsGame(), true);
+            expect(row(blocked, "ZombieBuddy.jar").undecided(), false);
+            // verified: starts without a question
+            w.publishIndex(Instant.now().plusSeconds(120), Map.of("verified", w.sha("ZombieBuddy.jar")));
+            Files.delete(game.resolve("ZombieBuddy.jar.new"));
+            expect(w.session().startStoppers().isEmpty(), true);
+        });
+        run("update hint: Steam update, change without update, version numbers", () -> {
+            Path dir = Files.createTempDirectory("bc-hint");
+            Path jar = dir.resolve("Mod/42/media/java/m.jar");
+            Files.createDirectories(jar.getParent());
+            java.util.jar.Manifest mf = new java.util.jar.Manifest();
+            mf.getMainAttributes().put(java.util.jar.Attributes.Name.MANIFEST_VERSION, "1.0");
+            mf.getMainAttributes().put(java.util.jar.Attributes.Name.IMPLEMENTATION_VERSION, "2.0");
+            try (var out = new java.util.jar.JarOutputStream(Files.newOutputStream(jar), mf)) {
+                out.putNextEntry(new java.util.zip.ZipEntry("a.txt"));
+                out.write(1);
+                out.closeEntry();
+            }
+            String sha = Hashing.sha256Hex(jar);
+            JavaMods.Jar j = new JavaMods.Jar(jar, sha, true);
+            JavaMods.JavaMod workshop = new JavaMods.JavaMod("Mod", "Mod", dir.resolve("Mod"), "123", "workshop", List.of(j));
+            JavaMods.JavaMod local = new JavaMods.JavaMod("Mod", "Mod", dir.resolve("Mod"), null, "local", List.of(j));
+            ZombieBuddyApprovals a = ZombieBuddyApprovals.load(dir.resolve("zb"));
+            LauncherState st = LauncherState.load(dir.resolve("state.toml"));
+            String key = "Mod/42/media/java/m.jar";
+            st.trusted().put(key, new LauncherState.Trusted(key, "ab".repeat(32), "1.0", "100"));
+            java.util.function.Function<List<Planner.Row>, Planner.ChangeKind> kind = rows -> rows.get(0).change().kind();
+            expect(kind.apply(Planner.plan(List.of(workshop), Optional.empty(), Instant.now(), a, st, Map.of("123", "200"))),
+                    Planner.ChangeKind.UPDATE);
+            expect(kind.apply(Planner.plan(List.of(workshop), Optional.empty(), Instant.now(), a, st, Map.of("123", "100"))),
+                    Planner.ChangeKind.WITHOUT_UPDATE);
+            expect(kind.apply(Planner.plan(List.of(workshop), Optional.empty(), Instant.now(), a, st, Map.of())),
+                    Planner.ChangeKind.UNKNOWN);
+            expect(kind.apply(Planner.plan(List.of(local), Optional.empty(), Instant.now(), a, st)),
+                    Planner.ChangeKind.UPDATE); // 1.0 -> 2.0
+            st.trusted().put(key, new LauncherState.Trusted(key, "ab".repeat(32), "2.0", null));
+            expect(kind.apply(Planner.plan(List.of(local), Optional.empty(), Instant.now(), a, st)),
+                    Planner.ChangeKind.WITHOUT_UPDATE);
+            // no earlier trusted version, or the same jar: no hint
+            st.trusted().clear();
+            expect(Planner.plan(List.of(local), Optional.empty(), Instant.now(), a, st).get(0).change(), null);
+            // allowing it remembers this version; the state keeps it
+            st.allowedAnyway().put(sha, "test");
+            Planner.apply(Planner.plan(List.of(workshop), Optional.empty(), Instant.now(), a, st, Map.of("123", "300")),
+                    a, st, Map.of("123", "300"));
+            st.refused().put("cd".repeat(32), "test");
+            st.save();
+            LauncherState loaded = LauncherState.load(dir.resolve("state.toml"));
+            expect(loaded.trusted().get(key), new LauncherState.Trusted(key, sha, "2.0", "300"));
+            expect(loaded.refused().containsKey("cd".repeat(32)), true);
+        });
+        run("zombiebuddy config: preload and trusted authors cannot get around BiteCheck", () -> {
+            World w = World.create();
+            Path config = w.zb.resolve("config.json");
+            Files.createDirectories(w.zb);
+            String good = w.jars.get("good.jar").toString().replace("\\", "\\\\");
+            String shady = w.jars.get("shady.jar").toString().replace("\\", "\\\\");
+            Files.writeString(config, "{\"trusted_authors\": [\"76561198000000000\"], \"preload_mods\": {"
+                    + "\"Good\": {\"infPath\": \"x\", \"jarPath\": \"" + good + "\"},"
+                    + "\"Shady\": {\"infPath\": \"y\", \"jarPath\": \"" + shady + "\"},"
+                    + "\"Gone\": {\"infPath\": \"z\", \"jarPath\": \"/no/such.jar\"}},"
+                    + "\"auto_fix_mod_order\": false}");
+            Session s = w.session();
+            s.apply();
+            Map<?, ?> root = (Map<?, ?>) Json.parse(Files.readString(config));
+            expect(((List<?>) root.get("trusted_authors")).size(), 0);
+            expect(((Map<?, ?>) root.get("preload_mods")).keySet(), java.util.Set.of("Good")); // verified only
+            expect(root.get("auto_fix_mod_order"), Boolean.FALSE); // the rest stays
+            expect(s.notes.stream().filter(n -> n.contains("Preloading of")).count(), 2L);
+            // once the player allows Shady, its preloading is no longer touched
+            Files.writeString(config, "{\"preload_mods\": {\"Shady\": {\"infPath\": \"y\", \"jarPath\": \"" + shady + "\"}}}");
+            s.state.allowedAnyway().put(w.sha("shady.jar"), "test");
+            s.replan().apply();
+            expect(((Map<?, ?>) ((Map<?, ?>) Json.parse(Files.readString(config))).get("preload_mods")).size(), 1);
+        });
+        run("platform: reads when Steam updated the installed Workshop items", () -> {
+            String acf = """
+                    "AppWorkshop"
+                    {
+                    	"WorkshopItemsInstalled"
+                    	{
+                    		"3684713089"
+                    		{
+                    			"size"		"123"
+                    			"timeupdated"		"1700000000"
+                    			"manifest"		"55"
+                    		}
+                    	}
+                    	"WorkshopItemDetails"
+                    	{
+                    		"3684713089"
+                    		{
+                    			"manifest"		"56"
+                    			"timeupdated"		"1800000000"
+                    		}
+                    	}
+                    }
+                    """;
+            expect(Platform.parseWorkshopUpdateTimes(acf), Map.of("3684713089", "1700000000"));
         });
         run("flow: flagged mod is blocked until the player allows it", () -> {
             World w = World.create();
@@ -334,6 +502,9 @@ public final class LauncherSelfTest {
             expect(both, "\"C:\\Users\\me\\AppData\\Local\\Jumpstart\\Jumpstart.exe\" --wrap " + quoted
                     + " --wrap %command% -agentlib:zbNative --");
             expect(SteamSetup.isSetUp(java.util.Optional.of(both)), true);
+            expect(SteamSetup.hasJumpstart(both), true);
+            expect(SteamSetup.hasJumpstart("\"/jre64/bin/java\" -jar \"/home/me/.jumpstart/JumpstartSetup.jar\" --wrap %command%"), true);
+            expect(SteamSetup.hasJumpstart(done), false);
             expect(SteamSetup.launchOptions(Platform.Os.WINDOWS, script, java.util.Optional.of(both)), both);
             expect(SteamSetup.isSetUp(java.util.Optional.of("\"C:\\Program Files\\BiteCheck\\BiteCheck.exe\" --wrap %command%")), true);
             expect(SteamSetup.isSetUp(java.util.Optional.of("\"/Applications/BiteCheck.app/Contents/MacOS/BiteCheck\" --wrap %command%")), true);
@@ -372,7 +543,7 @@ public final class LauncherSelfTest {
             expect(LauncherMain.run(new String[] {"--dir", dir, "--sync"}, quiet, quiet), 0);
             expect(ZombieBuddyApprovals.load(w.zb).decision(w.sha("unknown.jar")), Boolean.TRUE);
             expect(LauncherMain.run(new String[] {"--dir", dir, "--revoke", w.sha("unknown.jar")}, quiet, quiet), 0);
-            expect(ZombieBuddyApprovals.load(w.zb).decision(w.sha("unknown.jar")), null);
+            expect(ZombieBuddyApprovals.load(w.zb).decision(w.sha("unknown.jar")), Boolean.FALSE); // off until asked again
             // suspicious and blocked mods need more than a plain --allow
             expect(LauncherMain.run(new String[] {"--dir", dir, "--allow", w.sha("shady.jar")}, quiet, quiet), 2);
             expect(LauncherMain.run(new String[] {"--dir", dir, "--allow", w.sha("evil.jar"),

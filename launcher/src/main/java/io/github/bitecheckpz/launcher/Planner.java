@@ -17,19 +17,24 @@ import java.util.concurrent.ConcurrentHashMap;
 /**
  * Turns the installed Java mods and the registry index into decisions for ZombieBuddy.
  *
+ * <p>The player decides in BiteCheck, not in ZombieBuddy: any Java mod can write ZombieBuddy's
+ * approvals file, so BiteCheck keeps the player's answers in its own state and writes an explicit
+ * allow or deny for every jar. ZombieBuddy then has nothing left to ask.
+ *
  * <table>
  *   <caption>What happens per jar</caption>
  *   <tr><th>Status</th><th>ZombieBuddy decision</th></tr>
  *   <tr><td>VERIFIED</td><td>allow - loads without a question</td></tr>
- *   <tr><td>UNVERIFIED, local scan clean or soft findings only</td><td>unchanged - ZombieBuddy warns
- *       and asks the player in game; an approval BiteCheck wrote earlier is taken back</td></tr>
- *   <tr><td>UNVERIFIED, local scan has hard findings ("suspicious")</td><td>deny, unless the player
- *       allowed it anyway (double confirmation)</td></tr>
- *   <tr><td>FLAGGED</td><td>deny, unless the player allowed it anyway (double confirmation)</td></tr>
- *   <tr><td>BLOCKED</td><td>deny - never loads</td></tr>
- *   <tr><td>UNVERIFIED, allowed ahead of time with {@code --allow}</td><td>allow (e.g. on a dedicated
- *       server, where ZombieBuddy runs with {@code policy=deny-new} and cannot ask)</td></tr>
+ *   <tr><td>UNVERIFIED, local scan clean or soft findings only</td><td>deny until the player allowed
+ *       it; BiteCheck asks before the start (one question)</td></tr>
+ *   <tr><td>UNVERIFIED with hard findings ("suspicious"), or FLAGGED</td><td>deny until the player
+ *       allowed it anyway (two confirmations)</td></tr>
+ *   <tr><td>BLOCKED, INVALID</td><td>deny - never loads</td></tr>
  * </table>
+ *
+ * <p>A "no" is remembered too, so BiteCheck does not ask again at every start. ZombieBuddy's own
+ * jar (in the game folder) follows the same rules, but cannot be denied through its own approvals:
+ * a ZombieBuddy jar that would be denied keeps the game from starting ({@link Row#stopsGame()}).
  *
  * <p>The local scan is a provisional check for mods nobody has reviewed yet. It catches obvious
  * red flags (process start, native code, runtime code loading, obfuscation) but is no review.
@@ -37,7 +42,7 @@ import java.util.concurrent.ConcurrentHashMap;
 public final class Planner {
 
     public enum Action {
-        NONE, ALLOW, DENY, ASK_IN_GAME
+        NONE, ALLOW, DENY
     }
 
     /**
@@ -46,12 +51,44 @@ public final class Planner {
      */
     public record Row(JavaMods.JavaMod mod, JavaMods.Jar jar, Verifier.Status status, String info,
             Boolean currentDecision, Action action, boolean allowedAnyway, Scanner.Report scan,
-            boolean suspicious) {
+            boolean suspicious, Change change, boolean refused) {
 
-        /** Flagged or suspicious: blocked by BiteCheck unless the player allows it anyway. */
+        /** Flagged or suspicious: allowing it takes two confirmations instead of one. */
         public boolean needsPermission() {
             return status == Verifier.Status.FLAGGED || suspicious;
         }
+
+        /** Not verified and the player has not answered yet: BiteCheck asks before the start. */
+        public boolean undecided() {
+            return (status == Verifier.Status.UNVERIFIED || status == Verifier.Status.FLAGGED)
+                    && !allowedAnyway && !refused;
+        }
+
+        /**
+         * ZombieBuddy's own jar under the same rules as every mod, where it cannot decide about
+         * itself: "does not load" means the game does not start with this jar.
+         */
+        public boolean stopsGame() {
+            return mod.isLoader() && (status == Verifier.Status.BLOCKED || status == Verifier.Status.INVALID
+                    || (status != Verifier.Status.VERIFIED && !allowedAnyway));
+        }
+    }
+
+    /**
+     * How an unverified jar relates to the version of the same jar the player trusted before.
+     * Only a hint for the player's decision: a jar can claim any version, and anything on the
+     * computer can write Steam's files.
+     */
+    public enum ChangeKind {
+        /** Steam updated the Workshop item, or the jar has a new version number. */
+        UPDATE,
+        /** The jar changed, but Steam did not update the item / the version number is the same. */
+        WITHOUT_UPDATE,
+        /** The jar changed; BiteCheck cannot tell whether it was an update. */
+        UNKNOWN
+    }
+
+    public record Change(ChangeKind kind, String text) {
     }
 
     /** Scan results by jar hash; jars do not change under the same hash. */
@@ -62,6 +99,12 @@ public final class Planner {
 
     public static List<Row> plan(List<JavaMods.JavaMod> mods, Optional<Index> index, Instant now,
             ZombieBuddyApprovals approvals, LauncherState state) {
+        return plan(mods, index, now, approvals, state, Map.of());
+    }
+
+    /** @param steamUpdated when Steam last updated each Workshop item, see {@link Platform#workshopUpdateTimes()} */
+    public static List<Row> plan(List<JavaMods.JavaMod> mods, Optional<Index> index, Instant now,
+            ZombieBuddyApprovals approvals, LauncherState state, Map<String, String> steamUpdated) {
         boolean stale = index.isPresent() && index.get().isStale(now);
         List<Row> rows = new ArrayList<>();
         for (JavaMods.JavaMod mod : mods) {
@@ -85,29 +128,78 @@ public final class Planner {
                 }
                 Boolean current = approvals.decision(sha);
                 boolean allowedAnyway = state.allowedAnyway().containsKey(sha);
-                boolean needsPermission = status == Verifier.Status.FLAGGED || suspicious;
+                boolean refused = !allowedAnyway && state.refused().containsKey(sha);
+                boolean hardBlocked = status == Verifier.Status.BLOCKED || status == Verifier.Status.INVALID;
+                boolean allow = status == Verifier.Status.VERIFIED || (allowedAnyway && !hardBlocked);
+                if (!allow && !hardBlocked && !jar.build42()) {
+                    continue; // a Build 41 copy ZombieBuddy never loads: nothing to ask about
+                }
                 Action action;
-                if (status == Verifier.Status.VERIFIED) {
-                    action = Boolean.TRUE.equals(current) ? Action.NONE : Action.ALLOW;
-                } else if (status == Verifier.Status.BLOCKED || status == Verifier.Status.INVALID) {
-                    action = Boolean.FALSE.equals(current) ? Action.NONE : Action.DENY;
-                } else if (needsPermission) {
-                    action = allowedAnyway
-                            ? (Boolean.TRUE.equals(current) ? Action.NONE : Action.ALLOW)
-                            : (Boolean.FALSE.equals(current) ? Action.NONE : Action.DENY);
-                } else if (allowedAnyway) {
-                    // unverified, approved ahead of time by the player or server admin (--allow)
+                if (mod.isLoader()) {
+                    action = Action.NONE; // decided at the start, not in ZombieBuddy's approvals
+                } else if (allow) {
                     action = Boolean.TRUE.equals(current) ? Action.NONE : Action.ALLOW;
                 } else {
-                    action = state.autoApproved().containsKey(sha) ? Action.ASK_IN_GAME : Action.NONE;
-                    if (!jar.build42() && action == Action.NONE) {
-                        continue; // a Build 41 copy ZombieBuddy never loads and never asks about
-                    }
+                    action = Boolean.FALSE.equals(current) ? Action.NONE : Action.DENY;
                 }
-                rows.add(new Row(mod, jar, status, info, current, action, allowedAnyway, scan, suspicious));
+                Change change = status == Verifier.Status.VERIFIED ? null
+                        : change(state.trusted().get(jarKey(mod, jar)), jar, mod, steamUpdated);
+                rows.add(new Row(mod, jar, status, info, current, action, allowedAnyway, scan, suspicious, change,
+                        refused));
             }
         }
         return rows;
+    }
+
+    /** Where the jar sits, the same for every version: mod id and path inside the mod folder. */
+    static String jarKey(JavaMods.JavaMod mod, JavaMods.Jar jar) {
+        String rel = mod.folder().relativize(jar.path()).toString().replace('\\', '/');
+        if (mod.isLoader() && rel.endsWith(JavaMods.PENDING_SUFFIX)) {
+            rel = rel.substring(0, rel.length() - JavaMods.PENDING_SUFFIX.length()); // the update of the same jar
+        }
+        return mod.id() + "/" + rel;
+    }
+
+    private static Change change(LauncherState.Trusted before, JavaMods.Jar jar, JavaMods.JavaMod mod,
+            Map<String, String> steamUpdated) {
+        if (before == null || before.sha256().equals(jar.sha256())) {
+            return null;
+        }
+        if (mod.workshopId() != null) {
+            String now = steamUpdated.get(mod.workshopId());
+            if (now == null || before.steamUpdated() == null) {
+                return new Change(ChangeKind.UNKNOWN, "Changed since you last trusted it; BiteCheck cannot tell "
+                        + "whether Steam updated it.");
+            }
+            if (!now.equals(before.steamUpdated())) {
+                return new Change(ChangeKind.UPDATE, "Update of a version you trusted (Steam updated the mod on "
+                        + date(now) + "). If you trust the author, allowing it is usually safe.");
+            }
+            return new Change(ChangeKind.WITHOUT_UPDATE, "Changed without an update: this jar differs from the "
+                    + "version you trusted, but Steam did not update the mod. Only allow it if you changed it yourself.");
+        }
+        String version = JavaMods.version(jar.path());
+        if (version == null || before.version() == null) {
+            return new Change(ChangeKind.UNKNOWN, "Changed since you last trusted it; BiteCheck cannot tell "
+                    + "whether this is an update.");
+        }
+        if (!version.equals(before.version())) {
+            return new Change(ChangeKind.UPDATE, "Update of a version you trusted (" + before.version() + " to "
+                    + version + "). If you trust the author, allowing it is usually safe.");
+        }
+        return new Change(ChangeKind.WITHOUT_UPDATE, "Changed without an update: this jar differs from the "
+                + "version you trusted, but has the same version number (" + version
+                + "). Only allow it if you changed it yourself.");
+    }
+
+    private static String date(String unixSeconds) {
+        try {
+            return java.time.format.DateTimeFormatter.ofPattern("d MMM yyyy", java.util.Locale.ENGLISH)
+                    .withZone(java.time.ZoneId.systemDefault())
+                    .format(Instant.ofEpochSecond(Long.parseLong(unixSeconds)));
+        } catch (RuntimeException e) {
+            return unixSeconds;
+        }
     }
 
     static Optional<Scanner.Report> scan(JavaMods.Jar jar) {
@@ -147,8 +239,22 @@ public final class Planner {
 
     /** Applies the planned actions to ZombieBuddy's approvals and BiteCheck's own state. */
     public static int apply(List<Row> rows, ZombieBuddyApprovals approvals, LauncherState state) {
+        return apply(rows, approvals, state, Map.of());
+    }
+
+    public static int apply(List<Row> rows, ZombieBuddyApprovals approvals, LauncherState state,
+            Map<String, String> steamUpdated) {
         int changes = 0;
         for (Row row : rows) {
+            if (trusted(row)) {
+                String key = jarKey(row.mod(), row.jar());
+                state.trusted().put(key, new LauncherState.Trusted(key, row.jar().sha256(),
+                        JavaMods.version(row.jar().path()),
+                        row.mod().workshopId() == null ? null : steamUpdated.get(row.mod().workshopId())));
+            }
+            if (row.mod().isLoader()) {
+                continue; // never written into ZombieBuddy's approvals
+            }
             String sha = row.jar().sha256();
             String label = row.mod().id() + " " + row.jar().path().getFileName();
             switch (row.action()) {
@@ -164,11 +270,6 @@ public final class Planner {
                     state.autoApproved().remove(sha);
                     changes++;
                 }
-                case ASK_IN_GAME -> {
-                    approvals.remove(sha);
-                    state.autoApproved().remove(sha);
-                    changes++;
-                }
                 case NONE -> {
                     if (row.status() == Verifier.Status.VERIFIED) {
                         state.autoApproved().put(sha, label);
@@ -177,5 +278,15 @@ public final class Planner {
             }
         }
         return changes;
+    }
+
+    /** Loads with the player's trust: verified, or allowed by the player in BiteCheck. */
+    static boolean trusted(Row r) {
+        return switch (r.status()) {
+            case VERIFIED -> true;
+            case BLOCKED, INVALID -> false;
+            case FLAGGED -> r.allowedAnyway();
+            case UNVERIFIED -> r.allowedAnyway();
+        };
     }
 }
