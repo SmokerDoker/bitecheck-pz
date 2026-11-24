@@ -23,13 +23,20 @@ import java.util.zip.ZipFile;
  * so the jars themselves may differ only in timestamps and order. The manifest (exactly
  * META-INF/MANIFEST.MF) is compared by its attributes: only the names of the build tool and JDK
  * may differ; anything that changes loading (Class-Path, agents, per-entry sections, ...) must be
- * the same. Other spellings of the manifest and signature files are compared like any file.
+ * the same. Other spellings of the manifest are compared like any file.
+ *
+ * <p>A jar signature (jarsigner) is left out on both sides: the signature block files directly in
+ * META-INF ({@code *.SF}, {@code *.RSA}, {@code *.DSA}, {@code *.EC}) and the per-entry digest
+ * attributes in the manifest. A rebuild can never reproduce the author's signature, and a signature
+ * does not change what the code does; every signed file itself is still compared byte for byte.
  */
 public final class JarCompare {
 
     private static final String MANIFEST = "META-INF/MANIFEST.MF";
     private static final Set<String> BUILD_INFO =
             Set.of("Manifest-Version", "Created-By", "Built-By", "Build-Jdk", "Build-Jdk-Spec");
+    private static final java.util.regex.Pattern SIGNATURE_FILE =
+            java.util.regex.Pattern.compile("META-INF/[^/]+\\.(SF|RSA|DSA|EC)");
 
     private JarCompare() {
     }
@@ -71,7 +78,10 @@ public final class JarCompare {
         for (Map.Entry<String, Attributes> e : manifest.getEntries().entrySet()) {
             Map<String, String> attributes = new TreeMap<>();
             e.getValue().forEach((k, v) -> attributes.put(k.toString(), String.valueOf(v)));
-            sections.put(e.getKey(), attributes);
+            attributes.keySet().removeIf(k -> k.endsWith("-Digest")); // jar signature
+            if (!attributes.isEmpty()) {
+                sections.put(e.getKey(), attributes);
+            }
         }
         return new ManifestAttributes(main, sections);
     }
@@ -85,7 +95,7 @@ public final class JarCompare {
                 try (InputStream in = zip.getInputStream(entry)) {
                     content = in.readAllBytes();
                 }
-                if (entry.isDirectory() && content.length == 0) {
+                if ((entry.isDirectory() && content.length == 0) || SIGNATURE_FILE.matcher(entry.getName()).matches()) {
                     continue;
                 }
                 if (files.put(entry.getName(), content) != null) {

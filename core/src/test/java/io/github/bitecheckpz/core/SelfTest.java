@@ -417,6 +417,18 @@ public final class SelfTest {
             expect(JarCompare.differences(built, classPath),
                     List.of(m + ": attributes differ (beyond build tool and JDK)"));
             expect(JarCompare.differences(built, otherCase), List.of("meta-inf/manifest.mf: not built from the source"));
+            // the author's jarsigner signature is left out; the signed files themselves still count
+            Path signed = zipOf(Map.of("a/A.class", "A", "a/B.class", "B",
+                    m, "Manifest-Version: 1.0\n\nName: a/A.class\nSHA-256-Digest: abc=\n",
+                    "META-INF/ME_ZED_0.SF", "sig", "META-INF/ME_ZED_0.RSA", "block"), 0L);
+            expect(JarCompare.differences(built, signed), List.of());
+            Path signedChanged = zipOf(Map.of("a/A.class", "A2", "a/B.class", "B",
+                    m, "Manifest-Version: 1.0\n\nName: a/A.class\nSHA-256-Digest: abc=\n",
+                    "META-INF/ME_ZED_0.SF", "sig"), 0L);
+            expect(JarCompare.differences(built, signedChanged), List.of("a/A.class: differs"));
+            Path sealed = zipOf(Map.of("a/A.class", "A", "a/B.class", "B",
+                    m, "Manifest-Version: 1.0\n\nName: a/\nSealed: true\nSHA-256-Digest: abc=\n"), 0L);
+            expect(JarCompare.differences(built, sealed), List.of(m + ": attributes differ (beyond build tool and JDK)"));
         });
         run("workshop release: lint, build record of the Workshop jar, VERIFIED", () -> {
             Fixture f = Fixture.create();

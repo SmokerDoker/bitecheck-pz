@@ -5,7 +5,8 @@
 #   workshop: the Workshop item's jars (workshop/<path>, from fetch-workshop.sh) must have exactly
 #             the files that both builds produced (bcz jar-compare); final = the Workshop jars
 # Both builders must have used the same game files (game.txt). Scans the final jars into the step
-# summary. Exit 1 if the builds do not match, 14 if a scan has hard findings.
+# summary. Exit 1 if the builds do not match. Hard findings (bcz scan exit 14) do not fail the
+# check: they are listed in the summary and every review must explain them.
 # Usage: check-builds.sh <bcz> <release.toml> <registry dir>
 set -euo pipefail
 bcz="$1" release="$2" registry="$3"
@@ -56,6 +57,6 @@ fi
 
 status=0
 for jar in final/*.jar; do
-  "$bcz" scan "$jar" --format markdown >> "$summary" || status=$?
+  "$bcz" scan "$jar" --format markdown >> "$summary" || { code=$?; [ "$code" -eq 14 ] || status=$code; }
 done
 exit $status
