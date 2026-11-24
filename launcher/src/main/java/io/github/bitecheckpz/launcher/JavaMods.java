@@ -65,21 +65,18 @@ public final class JavaMods {
             return Optional.empty();
         }
         Path g = game.get();
+        // every folder the game may run in on some system: a copy in one must not hide another
+        List<Jar> jars = new ArrayList<>();
         for (Path dir : List.of(g, g.resolve("projectzomboid"), g.resolve("java"),
                 g.resolve("Project Zomboid.app/Contents/Java"))) {
-            Path jar = dir.resolve(ZOMBIE_BUDDY_JAR);
-            Path pending = dir.resolve(ZOMBIE_BUDDY_JAR + PENDING_SUFFIX);
-            List<Jar> jars = new ArrayList<>();
-            for (Path p : List.of(jar, pending)) {
+            for (Path p : List.of(dir.resolve(ZOMBIE_BUDDY_JAR), dir.resolve(ZOMBIE_BUDDY_JAR + PENDING_SUFFIX))) {
                 if (Files.isRegularFile(p)) {
                     jars.add(new Jar(p, Hashing.sha256Hex(p), true));
                 }
             }
-            if (!jars.isEmpty()) {
-                return Optional.of(new JavaMod("ZombieBuddy", "ZombieBuddy", dir, null, LOADER_SOURCE, jars));
-            }
         }
-        return Optional.empty();
+        return jars.isEmpty() ? Optional.empty()
+                : Optional.of(new JavaMod("ZombieBuddy", "ZombieBuddy", g, null, LOADER_SOURCE, jars));
     }
 
     /** The jar's {@code Implementation-Version}, or null. */

@@ -263,6 +263,14 @@ public final class LauncherSelfTest {
             expect(ZombieBuddyApprovals.load(w.zb).decision(w.sha("ZombieBuddy.jar")), null); // not its own approval
             s.state.allowedAnyway().put(w.sha("ZombieBuddy.jar"), "test");
             expect(row(s.replan(), "ZombieBuddy.jar").stopsGame(), false);
+            // a second ZombieBuddy.jar in another folder the game may run in is checked as well
+            Files.createDirectories(game.resolve("projectzomboid"));
+            Files.writeString(game.resolve("projectzomboid/ZombieBuddy.jar"), "other copy");
+            Session two = w.session();
+            expect(two.rows.stream().filter(r -> r.mod().isLoader()).count(), 2L);
+            expect(two.rows.stream().anyMatch(r -> r.jar().path().startsWith(game.resolve("projectzomboid"))
+                    && r.stopsGame()), true);
+            Files.delete(game.resolve("projectzomboid/ZombieBuddy.jar"));
             // a waiting update (zbNative puts it in place at the start) is checked too
             Files.writeString(game.resolve("ZombieBuddy.jar.new"), "update");
             Session withUpdate = w.session();
