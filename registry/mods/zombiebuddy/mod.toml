@@ -1,0 +1,8 @@
+id = "zombiebuddy"
+name = "ZombieBuddy"
+author = "Zed (zed-0xff)"
+publisher = "smokerdoker"
+source = "https://github.com/zed-0xff/ZombieBuddy"
+license = "MIT"
+workshop_id = "3619862853"
+status = "active"

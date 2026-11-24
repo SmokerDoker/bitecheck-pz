@@ -1,0 +1,16 @@
+mod = "zombiebuddy"
+version = "2.3.4"
+commit = "9a08a542cfb55f7c8f4973a545639430b3c601ee"
+
+# The mod loader itself: players load ZombieBuddy.jar from the game folder (a copy of the Workshop jar).
+# The Workshop jar is signed by Zed (jarsigner); CI compares it without that signature.
+# Built like Zed's own release: JDK 17 and Gradle 9.3.1 (the tag has no wrapper jar), shadowJar.
+# javac 17 cannot read the current game jar (class version 69), so the build compiles against a copy
+# with the class version set to 61; the game classes are compile-only and not bundled.
+[build]
+type = "workshop"
+workshop_id = "3619862853"
+jdk = "temurin-17"
+command = "T=\"$(mktemp -d)\" && curl -sSfLo \"$T/gradle.zip\" https://services.gradle.org/distributions/gradle-9.3.1-bin.zip && echo \"b266d5ff6b90eada6dc3b20cb090e3731302e553a27c5d3e4df1f0d76beaff06  $T/gradle.zip\" | sha256sum -c - && unzip -q \"$T/gradle.zip\" -d \"$T\" && python3 -c \"import sys,zipfile;zi=zipfile.ZipFile(sys.argv[1]);zo=zipfile.ZipFile(sys.argv[2],'w',zipfile.ZIP_DEFLATED);f=lambda n,b:b[:6]+(61).to_bytes(2,'big')+b[8:] if n.endswith('.class') and b[:4]==bytes.fromhex('cafebabe') and int.from_bytes(b[6:8],'big')>61 else b;[zo.writestr(i,f(i.filename,zi.read(i))) for i in zi.infolist()];zo.close()\" \"$PZ_GAME_DIR/java/projectzomboid.jar\" \"$T/pz-java17.jar\" && cd java && JAVA_TOOL_OPTIONS=-Dfile.encoding=UTF-8 \"$T/gradle-9.3.1/bin/gradle\" --no-daemon -q shadowJar -PgameClasspath=\"$T/pz-java17.jar\""
+artifacts = ["java/build/libs/ZombieBuddy.jar"]
+workshop_artifacts = ["mods/ZombieBuddy/libs/ZombieBuddy.jar"]
