@@ -10,15 +10,18 @@ import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
+import javax.swing.JDialog;
 import javax.swing.JOptionPane;
 import javax.swing.SwingUtilities;
 
 /**
- * The player's decision about mods that are not verified, the same for every mod including
- * ZombieBuddy: one question for an unverified mod, two confirmations for a flagged or suspicious
- * one. Answers are kept in BiteCheck's state, so each jar is asked about once. A "no" for an
- * ordinary mod keeps that mod off; a "no" (or a block) for ZombieBuddy keeps the game from
- * starting, because ZombieBuddy cannot switch itself off.
+ * The player's decision about mods that are not verified, the same for every mod including the
+ * loader (ZombieBuddy or Jumpstart). Before the start one window lists every open mod with a
+ * checkbox ({@link StartDialog}); a ticked flagged or suspicious mod also needs ALLOW typed. A "yes"
+ * is kept in BiteCheck's state, so the jar is not asked about again. An unticked mod stays off for
+ * this start and is asked about next time. Without the loader allowed (or with it blocked) the game
+ * does not start, because the loader cannot switch itself off; a window says so.
  */
 final class StartGate {
 
@@ -102,7 +105,7 @@ final class StartGate {
         for (Planner.Row r : session.rows) {
             if (r.mod().isLoader() && hardBlocked(r)) {
                 String loader = LauncherWindow.escape(r.mod().name());
-                JOptionPane.showMessageDialog(parent, "<html><b>" + loader + " is " + word(r) + "</b> and cannot be "
+                message(parent, "<html><b>" + loader + " is " + word(r) + "</b> and cannot be "
                         + "allowed:<br>" + LauncherWindow.escape(r.info()) + "<br><br>The game does not start with it. "
                         + "Install " + loader + " again from its official source.</html>",
                         r.mod().name() + " blocked", JOptionPane.ERROR_MESSAGE);
@@ -111,28 +114,100 @@ final class StartGate {
         }
         Path stateFile = biteCheckDir.resolve("state.toml");
         if (session.state.tampered()) {
-            JOptionPane.showMessageDialog(parent, "<html><b>Your saved answers were changed outside BiteCheck.</b><br><br>"
+            message(parent, "<html><b>Your saved answers were changed outside BiteCheck.</b><br><br>"
                     + "Something on this computer edited " + LauncherWindow.escape(stateFile.toString()) + ".<br>"
                     + "BiteCheck ignores those answers and asks you again. If you did not edit the file yourself,<br>"
                     + "check your computer with an antivirus program.</html>",
                     "Answers changed", JOptionPane.WARNING_MESSAGE);
         }
-        for (Question q : questions(session)) {
-            boolean yes = ask(parent, q, stateFile);
-            for (Planner.Row r : q.rows()) {
-                String sha = r.jar().sha256();
-                if (yes) {
-                    session.state.refused().remove(sha);
-                    session.state.allowedAnyway().put(sha, q.mod().id() + " - allowed by the player");
-                } else if (!q.mod().isLoader()) {
-                    session.state.refused().put(sha, q.mod().id() + " - not allowed by the player");
-                }
+        List<Question> questions = questions(session);
+        if (questions.isEmpty()) {
+            return true;
+        }
+        // one window with every open mod; unticked ones stay off for this start and are asked again
+        Optional<List<Question>> ticked = StartDialog.show(parent, questions);
+        Optional<Question> loader = questions.stream().filter(q -> q.mod().isLoader()).findFirst();
+        if (ticked.isEmpty()) {
+            if (loader.isPresent()) {
+                notStarted(parent, loader.get().mod().name());
+                return false;
             }
-            if (!yes && q.mod().isLoader()) {
-                return false; // asked again at the next start
+            return true;
+        }
+        for (Question q : ticked.get()) {
+            boolean yes = !q.risky() || confirmRisky(parent, q, stateFile);
+            if (yes) {
+                for (Planner.Row r : q.rows()) {
+                    session.state.refused().remove(r.jar().sha256());
+                    session.state.allowedAnyway().put(r.jar().sha256(), q.mod().id() + " - allowed by the player");
+                }
+            } else if (q.mod().isLoader()) {
+                notStarted(parent, q.mod().name());
+                return false;
             }
         }
         return true;
+    }
+
+    /** Visible, so the player knows why the game does not start (asked again at the next start). */
+    private static void notStarted(Component parent, String loader) {
+        message(parent, "<html><b>The game does not start.</b><br><br>" + LauncherWindow.escape(loader)
+                + " loads every Java mod and is not allowed yet.<br>Start the game again to decide.</html>",
+                "BiteCheck", JOptionPane.INFORMATION_MESSAGE);
+    }
+
+    /** Keeps a BiteCheck window above Steam and the desktop: started from Steam it must not hide. */
+    static void onTop(java.awt.Window w) {
+        w.setAlwaysOnTop(true);
+        w.setAutoRequestFocus(true);
+    }
+
+    static void message(Component parent, Object text, String title, int type) {
+        JOptionPane pane = new JOptionPane(text, type);
+        JDialog d = pane.createDialog(parent, title);
+        onTop(d);
+        d.setVisible(true);
+        d.dispose();
+    }
+
+    static int confirm(Component parent, Object text, String title, int type) {
+        JOptionPane pane = new JOptionPane(text, type, JOptionPane.YES_NO_OPTION);
+        JDialog d = pane.createDialog(parent, title);
+        onTop(d);
+        d.setVisible(true);
+        d.dispose();
+        return pane.getValue() instanceof Integer i ? i : JOptionPane.CLOSED_OPTION;
+    }
+
+    static String input(Component parent, Object text, String title) {
+        JOptionPane pane = new JOptionPane(text, JOptionPane.WARNING_MESSAGE, JOptionPane.OK_CANCEL_OPTION);
+        pane.setWantsInput(true);
+        JDialog d = pane.createDialog(parent, title);
+        onTop(d);
+        pane.selectInitialValue();
+        d.setVisible(true);
+        d.dispose();
+        boolean ok = pane.getValue() instanceof Integer i && i == JOptionPane.OK_OPTION;
+        Object v = pane.getInputValue();
+        return ok && v != JOptionPane.UNINITIALIZED_VALUE ? String.valueOf(v) : null;
+    }
+
+    /** True for "ALLOW" in any case, with spaces around it. */
+    static boolean typedAllow(String typed) {
+        return typed != null && typed.strip().equalsIgnoreCase("ALLOW");
+    }
+
+    /** The second confirmation for a ticked flagged or risky mod: type ALLOW. */
+    private static boolean confirmRisky(Component parent, Question q, Path stateFile) {
+        Planner.Row row = q.rows().stream().filter(Planner.Row::needsPermission).findFirst().orElse(q.first());
+        String name = LauncherWindow.escape(q.mod().name());
+        String why = row.status() == Verifier.Status.FLAGGED
+                ? "has been <b>flagged</b> as possibly harmful by the BiteCheck registry"
+                : "is not reviewed and BiteCheck's <b>local scan</b> found risky code";
+        return typedAllow(input(parent, "<html><b>" + name + "</b> " + why + ":<br>" + LauncherWindow.escape(row.info())
+                + "<br><br>Only allow it if you trust the author and know why it needs this.<br>"
+                + "To confirm, type <b>ALLOW</b>. You can undo this by deleting<br>"
+                + LauncherWindow.escape(stateFile.toString()) + "</html>", "Risky mod: " + q.mod().name()));
     }
 
     /**
@@ -156,29 +231,28 @@ final class StartGate {
                 ? name + " loads every Java mod. If you say no, the game does not start."
                 : "Java mods can access your whole computer. If you say no, the game starts without this mod.";
         if (!q.risky()) {
-            int answer = JOptionPane.showConfirmDialog(parent, "<html><b>" + name + "</b> is not reviewed yet:<br>"
+            int answer = confirm(parent, "<html><b>" + name + "</b> is not reviewed yet:<br>"
                     + LauncherWindow.escape(row.info()) + hint + "<br><br>" + what + "<br><br>"
                     + "Allow " + name + "?</html>",
-                    "Not reviewed", JOptionPane.YES_NO_OPTION, JOptionPane.QUESTION_MESSAGE);
+                    "Not reviewed", JOptionPane.QUESTION_MESSAGE);
             return answer == JOptionPane.YES_OPTION;
         }
         String why = row.status() == Verifier.Status.FLAGGED
                 ? "has been <b>flagged</b> as possibly harmful by the BiteCheck registry:"
                 : "is not reviewed and BiteCheck's <b>local scan</b> found risky code:";
-        int first = JOptionPane.showConfirmDialog(parent,
+        int first = confirm(parent,
                 "<html><b>" + name + "</b> " + why + "<br><br>" + LauncherWindow.escape(row.info()) + hint
                         + "<br><br>" + what + "<br>"
                         + "Only allow it if you trust the author and know why it needs this.<br>"
                         + "Do you really want to allow it?</html>",
-                "Risky mod", JOptionPane.YES_NO_OPTION, JOptionPane.WARNING_MESSAGE);
+                "Risky mod", JOptionPane.WARNING_MESSAGE);
         if (first != JOptionPane.YES_OPTION) {
             return false;
         }
-        String typed = JOptionPane.showInputDialog(parent,
+        return typedAllow(input(parent,
                 "<html>To confirm, type <b>ALLOW</b>. You can undo this by deleting<br>"
                         + LauncherWindow.escape(stateFile.toString()) + "</html>",
-                "Confirm", JOptionPane.WARNING_MESSAGE);
-        return "ALLOW".equals(typed == null ? null : typed.strip());
+                "Confirm"));
     }
 
     /** The mod loader's name for messages: ZombieBuddy, or Jumpstart with ZombieBuddy built in. */
@@ -191,7 +265,7 @@ final class StartGate {
         return r.status() == Verifier.Status.BLOCKED || r.status() == Verifier.Status.INVALID;
     }
 
-    private static String word(Planner.Row r) {
+    static String word(Planner.Row r) {
         return switch (r.status()) {
             case BLOCKED -> "blocked";
             case INVALID -> "invalid (its registry entry does not match its signature)";
