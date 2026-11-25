@@ -11,8 +11,8 @@ you can do on your computer, including changing BiteCheck itself.
 - Every Java mod jar, and ZombieBuddy's own jar (or Jumpstart.jar, which has ZombieBuddy built in), is checked before the game starts. A jar loads
   without a question only if its exact SHA-256 hash was rebuilt from public source by CI and
   approved by a reviewer, in a registry signed with keys that only CI holds.
-- Every other jar loads only after you allowed it in BiteCheck: one question for an unverified
-  jar, two confirmations if the local scan found risky code or the jar is flagged. Blocked jars
+- Every other jar loads only after you allowed it in BiteCheck: you tick it in the window before
+  the start, and type ALLOW as well if the local scan found risky code or the jar is flagged. Blocked jars
   never load. Your answers are kept by BiteCheck, not in ZombieBuddy's approvals file, which any
   Java mod could write.
 - When a jar you trusted changes, BiteCheck tells you whether Steam updated the mod or whether

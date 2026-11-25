@@ -662,6 +662,14 @@ public final class LauncherSelfTest {
             expect(SteamSetup.undo(Platform.Os.WINDOWS, true).contains("zbNative"), false);
             expect(SteamSetup.undo(Platform.Os.WINDOWS, false).contains("zbNative"), true);
         });
+        run("start gate: ALLOW is accepted in any case, nothing else is", () -> {
+            expect(StartGate.typedAllow("ALLOW"), true);
+            expect(StartGate.typedAllow(" allow "), true);
+            expect(StartGate.typedAllow("Allow"), true);
+            expect(StartGate.typedAllow("yes"), false);
+            expect(StartGate.typedAllow(""), false);
+            expect(StartGate.typedAllow(null), false);
+        });
         run("steam: after the move to Program Files the line names the protected BiteCheck", () -> {
             java.util.Map<String, String> env = java.util.Map.of("ProgramFiles", "C:\\Program Files",
                     "LOCALAPPDATA", "C:\\Users\\me\\AppData\\Local");

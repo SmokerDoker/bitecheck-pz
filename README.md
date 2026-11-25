@@ -43,7 +43,7 @@ BiteCheck adds a verification step before a Java mod is loaded:
 BiteCheck works together with [ZombieBuddy](https://github.com/zed-0xff/ZombieBuddy), which loads Java mods. Start the game with the BiteCheck launcher (`BiteCheck.bat`, `BiteCheck.command` or `bitecheck.sh`); it checks every installed Java mod against the signed registry index and then starts Project Zomboid through Steam:
 
 - **Verified mods** load without any prompt.
-- **Unverified mods** still work: BiteCheck asks you once before the game starts, and remembers your answer for that exact file only. If the file changes, it asks again and tells you whether Steam updated the mod or the file changed without an update. ZombieBuddy itself is checked the same way.
+- **Unverified mods** still work: before the game starts, one window lists them and you tick the ones you trust (risky ones need a second confirmation). BiteCheck remembers a yes for that exact file only; mods you leave unticked stay off for this start and are shown again next time. If the file changes, it asks again and tells you whether Steam updated the mod or the file changed without an update. ZombieBuddy itself is checked the same way.
 - **Suspicious mods**: until a mod is reviewed, BiteCheck scans it locally. If the scan finds a process start, native code, runtime code loading or obfuscation, the mod is not loaded unless you allow it anyway (double confirmation). The local scan is a quick check, not a review.
 - **Flagged mods** are not loaded unless you allow them anyway (double confirmation).
 - **Mods with confirmed malware** are on a block list and never load.
