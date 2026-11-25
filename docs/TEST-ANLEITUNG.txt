@@ -56,14 +56,18 @@ Ablauf
    weil sie nicht im Test-Index sind; BiteCheck fragt beim Start einmal nach ihnen).
    Unten sollte der Pfad zu Project Zomboid stehen ("Game: ...").
 
-5. "Start Project Zomboid" klicken. Vor dem Start fragt BiteCheck nach jeder Mod,
-   die nicht geprüft ist (einmal, die Antwort wird gemerkt):
-     - "BiteCheck Test: Unverified": eine Frage. Bitte "Ja".
-     - "BiteCheck Test: Flagged" und "Suspicious": zwei Bestätigungen
-       (Ja, dann ALLOW eintippen). Hier bitte "Nein", die bleiben aus.
-     - Keine Frage für "Verified" (lädt einfach).
-   Dann schließt sich BiteCheck und Steam startet das Spiel. ZombieBuddy fragt im
-   Spiel nichts mehr, BiteCheck hat alles schon entschieden.
+5. "Start Project Zomboid" klicken. Vor dem Start zeigt BiteCheck EIN Fenster mit
+   allen Mods, die nicht geprüft sind, jede mit einem Häkchen (keins ist gesetzt):
+     - "BiteCheck Test: Unverified": bitte ankreuzen.
+     - "BiteCheck Test: Flagged" und "Suspicious": bitte NICHT ankreuzen, die
+       bleiben bei diesem Start aus. (Angekreuzt müsste man danach noch ALLOW
+       eintippen.)
+     - "Verified" steht nicht in der Liste (lädt einfach).
+   Dann "Start game". Ein Ja merkt sich BiteCheck; was nicht angekreuzt ist, steht
+   beim nächsten Start wieder in der Liste. Danach schließt sich BiteCheck und
+   Steam startet das Spiel. ZombieBuddy fragt im Spiel nichts mehr.
+   Das Fenster muss VOR allen anderen Fenstern erscheinen. Falls nicht: bitte
+   melden (Screenshot), das ist ein Fehler.
 
 6. Ins Log schauen: %USERPROFILE%\Zomboid\console.txt öffnen und nach
      [BiteCheck test]
@@ -108,7 +112,8 @@ Ablauf
 Was ich von dir zurück brauche
 ------------------------------
 - Screenshot vom BiteCheck-Fenster (Schritt 4)
-- Hat ZombieBuddy nur nach "Unverified" gefragt? (Screenshot vom Dialog, falls möglich)
+- Screenshot vom Fenster vor dem Start (Schritt 5): Standen dort genau Flagged,
+  Suspicious und Unverified, und war es vor allen anderen Fenstern?
 - Die "[BiteCheck test]"-Zeilen aus console.txt
 - Falls du Schritt 8 gemacht hast: Hat der Start aus Steam geklappt?
 - Bei Problemen: Fehlermeldungen und die Datei
