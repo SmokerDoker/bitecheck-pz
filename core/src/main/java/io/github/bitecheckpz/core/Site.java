@@ -160,7 +160,7 @@ public final class Site {
                 builds and signed reviews. The BiteCheck launcher loads <b>verified</b> jars without a question and warns
                 about everything else.</p>
                 <p class="dl"><b>Download the launcher:</b>
-                <a href="__REPO__/releases/latest/download/BiteCheck-windows-x64.msi">Windows</a> ·
+                <a href="__REPO__/releases/latest/download/BiteCheck-windows-x64-system.msi">Windows</a> ·
                 <a href="__REPO__/releases/latest/download/BiteCheck-macos-arm64.dmg">macOS (Apple Silicon)</a> ·
                 <a href="__REPO__/releases/latest/download/BiteCheck-macos-x64.dmg">macOS (Intel)</a> ·
                 <a href="__REPO__/releases/latest/download/BiteCheck-linux-x64.deb">Linux .deb</a> ·
