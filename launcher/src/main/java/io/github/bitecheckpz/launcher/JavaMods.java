@@ -36,6 +36,11 @@ public final class JavaMods {
     /** {@link JavaMod#source()} of ZombieBuddy's jar in the game folder, the mod loader itself. */
     static final String LOADER_SOURCE = "game folder";
     static final String ZOMBIE_BUDDY_JAR = "ZombieBuddy.jar";
+    /**
+     * Jumpstart: the ZombieBuddy fork, Jumpstart and its BiteCheck classes in one jar, started as
+     * {@code -javaagent:Jumpstart.jar}. It loads every other Java mod, like ZombieBuddy.jar.
+     */
+    static final String JUMPSTART_JAR = "Jumpstart.jar";
     /** A ZombieBuddy update waiting to replace the jar when the game starts (after BiteCheck ran). */
     static final String PENDING_SUFFIX = ".new";
 
@@ -48,16 +53,21 @@ public final class JavaMods {
 
     public record JavaMod(String id, String name, Path folder, String workshopId, String source, List<Jar> jars) {
 
-        /** ZombieBuddy, which loads every other Java mod: the game does not start without the player's OK. */
+        /**
+         * The mod loader (ZombieBuddy, or Jumpstart with ZombieBuddy built in), which loads every
+         * other Java mod: the game does not start without the player's OK.
+         */
         public boolean isLoader() {
             return LOADER_SOURCE.equals(source);
         }
     }
 
     /**
-     * ZombieBuddy as the game loads it: {@code ZombieBuddy.jar} in the folder the game runs in
+     * The mod loader as the game loads it: {@code ZombieBuddy.jar} in the folder the game runs in
      * ({@code -javaagent:ZombieBuddy.jar}, or {@code zbNative} on Windows), plus a waiting
-     * {@code ZombieBuddy.jar.new}, which {@code zbNative} puts in place when the game starts.
+     * {@code ZombieBuddy.jar.new}, which {@code zbNative} puts in place when the game starts; and
+     * {@code Jumpstart.jar} ({@code -javaagent:Jumpstart.jar}), which has ZombieBuddy built in and
+     * updates through Jumpstart's installer, not through a {@code .new} file.
      */
     public static Optional<JavaMod> zombieBuddy(Platform platform) throws IOException {
         Optional<Path> game = platform.gameDir();
@@ -65,18 +75,40 @@ public final class JavaMods {
             return Optional.empty();
         }
         Path g = game.get();
-        // every folder the game may run in on some system: a copy in one must not hide another
         List<Jar> jars = new ArrayList<>();
-        for (Path dir : List.of(g, g.resolve("projectzomboid"), g.resolve("java"),
-                g.resolve("Project Zomboid.app/Contents/Java"))) {
-            for (Path p : List.of(dir.resolve(ZOMBIE_BUDDY_JAR), dir.resolve(ZOMBIE_BUDDY_JAR + PENDING_SUFFIX))) {
+        for (Path dir : gameFolders(g)) {
+            for (Path p : List.of(dir.resolve(ZOMBIE_BUDDY_JAR), dir.resolve(ZOMBIE_BUDDY_JAR + PENDING_SUFFIX),
+                    dir.resolve(JUMPSTART_JAR))) {
                 if (Files.isRegularFile(p)) {
                     jars.add(new Jar(p, Hashing.sha256Hex(p), true));
                 }
             }
         }
-        return jars.isEmpty() ? Optional.empty()
-                : Optional.of(new JavaMod("ZombieBuddy", "ZombieBuddy", g, null, LOADER_SOURCE, jars));
+        if (jars.isEmpty()) {
+            return Optional.empty();
+        }
+        return Optional.of(new JavaMod("ZombieBuddy", loaderName(jars), g, null, LOADER_SOURCE, jars));
+    }
+
+    /** Every folder the game may run in on some system: a loader jar in one must not hide another. */
+    static List<Path> gameFolders(Path g) {
+        return List.of(g, g.resolve("projectzomboid"), g.resolve("java"), g.resolve("Project Zomboid.app/Contents/Java"));
+    }
+
+    /** True if Jumpstart's jar (with ZombieBuddy built in) is in the game folder. */
+    static boolean hasJumpstart(Platform platform) {
+        return platform.gameDir().map(g -> gameFolders(g).stream()
+                .anyMatch(d -> Files.isRegularFile(d.resolve(JUMPSTART_JAR)))).orElse(false);
+    }
+
+    /** The loader's name for the player: Jumpstart if its jar is there, ZombieBuddy if that is, or both. */
+    static String loaderName(List<Jar> jars) {
+        boolean jumpstart = jars.stream().anyMatch(j -> j.path().getFileName().toString().equals(JUMPSTART_JAR));
+        boolean zombieBuddy = jars.stream().anyMatch(j -> !j.path().getFileName().toString().equals(JUMPSTART_JAR));
+        if (jumpstart && zombieBuddy) {
+            return "Jumpstart and ZombieBuddy";
+        }
+        return jumpstart ? "Jumpstart (with ZombieBuddy)" : "ZombieBuddy";
     }
 
     /** The jar's {@code Implementation-Version}, or null. */

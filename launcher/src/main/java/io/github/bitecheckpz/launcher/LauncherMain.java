@@ -332,7 +332,7 @@ public final class LauncherMain {
         session.state.allowedAnyway().put(sha, row.needsPermission() ? "allowed by the player" : "approved ahead of time");
         session.replan().apply();
         out.println("Allowed " + row.mod().id() + " " + row.jar().path().getFileName() + "."
-                + (row.mod().isLoader() ? " The game starts with it." : " ZombieBuddy will load it."));
+                + (row.mod().isLoader() ? " The game starts with it." : " The mod loader will load it."));
         return 0;
     }
 
