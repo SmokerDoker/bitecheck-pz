@@ -34,13 +34,21 @@ cp "$JAR" "$WORK/input/BiteCheck.jar"
 # On Windows (Git Bash) jpackage.exe needs Windows paths.
 win() { if command -v cygpath >/dev/null 2>&1; then cygpath -m "$1"; else printf '%s' "$1"; fi; }
 
+# jpackage derives an MSI's ProductCode from vendor, name and version. The per-user and the Program
+# Files MSI of one version must not share it: with an old per-user copy of the same version installed,
+# Windows refuses the other one (error 1638) and the protected BiteCheck could never update.
+VENDOR="BiteCheck project"
+if [ "$TYPE" = "msi-system" ]; then
+    VENDOR="BiteCheck project (all users)"
+fi
+
 common=(
+    --vendor "$VENDOR"
     --dest "$(win "$WORK/out")"
     --app-version "$APP_VERSION"
     --input "$(win "$WORK/input")"
     --main-jar BiteCheck.jar
     --main-class io.github.bitecheckpz.launcher.LauncherMain
-    --vendor "BiteCheck project"
     --description "Verified Java mod launcher for Project Zomboid"
     --copyright "GPL-3.0-or-later, https://github.com/SmokerDoker/bitecheck-pz"
     --license-file "$(win "$ROOT/LICENSE")"
