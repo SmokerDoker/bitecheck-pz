@@ -69,7 +69,10 @@ final class StartDialog {
         list.setBorder(BorderFactory.createEmptyBorder(6, 10, 6, 10));
         Map<StartGate.Question, JCheckBox> boxes = new LinkedHashMap<>();
         for (StartGate.Question q : questions) {
-            JCheckBox box = new JCheckBox(q.mod().name() + (q.mod().isLoader() ? "  (needed to start the game)" : ""));
+            JCheckBox box = new JCheckBox();
+            // the name comes from mod.info, which the mod's author writes: never rendered as HTML
+            box.putClientProperty("html.disable", Boolean.TRUE);
+            box.setText(q.mod().name() + (q.mod().isLoader() ? "  (needed to start the game)" : ""));
             box.setFont(th.bold(1f));
             box.setForeground(th.text);
             box.setOpaque(false);
