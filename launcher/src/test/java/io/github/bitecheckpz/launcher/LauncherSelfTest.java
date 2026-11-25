@@ -662,6 +662,25 @@ public final class LauncherSelfTest {
             expect(SteamSetup.undo(Platform.Os.WINDOWS, true).contains("zbNative"), false);
             expect(SteamSetup.undo(Platform.Os.WINDOWS, false).contains("zbNative"), true);
         });
+        run("steam: after the move to Program Files the line names the protected BiteCheck", () -> {
+            java.util.Map<String, String> env = java.util.Map.of("ProgramFiles", "C:\\Program Files",
+                    "LOCALAPPDATA", "C:\\Users\\me\\AppData\\Local");
+            Path prot = Path.of("C:\\Program Files", "BiteCheck", "BiteCheck.exe");
+            Path old = Path.of("C:\\Users\\me\\AppData\\Local", "BiteCheck", "BiteCheck.exe");
+            String jumpstart = "\"C:\\jre\\javaw.exe\" -jar \"C:\\Users\\me\\.jumpstart\\JumpstartSetup.jar\" --wrap ";
+            String oldLine = jumpstart + "\"" + old + "\" --wrap %command%";
+            expect(SteamSetup.startsOldCopy(java.util.Optional.of(oldLine), prot, env), true);
+            expect(SteamSetup.launchOptions(Platform.Os.WINDOWS, prot, java.util.Optional.of(oldLine), true, env),
+                    jumpstart + "\"" + prot + "\" --wrap %command%");
+            // the old copy itself, or without Program Files, keeps the line as it is
+            expect(SteamSetup.startsOldCopy(java.util.Optional.of(oldLine), old, env), false);
+            expect(SteamSetup.launchOptions(Platform.Os.WINDOWS, old, java.util.Optional.of(oldLine), true, env), oldLine);
+            expect(SteamSetup.startsOldCopy(java.util.Optional.of(oldLine), prot, java.util.Map.of()), false);
+            // once the line names the protected BiteCheck, nothing changes any more
+            String newLine = jumpstart + "\"" + prot + "\" --wrap %command%";
+            expect(SteamSetup.startsOldCopy(java.util.Optional.of(newLine), prot, env), false);
+            expect(SteamSetup.launchOptions(Platform.Os.WINDOWS, prot, java.util.Optional.of(newLine), true, env), newLine);
+        });
         run("wrap: applies the decisions, runs the game command and passes its exit code", () -> {
             World w = World.create();
             if (Platform.detectOs() == Platform.Os.WINDOWS) {

@@ -30,7 +30,8 @@ final class SteamSetupDialog {
     static void show(JFrame owner, Platform platform) {
         Platform.Os os = platform.os();
         Optional<String> current = SteamSetup.currentLaunchOptions(platform).stream().findFirst();
-        boolean setUp = SteamSetup.isSetUp(current);
+        boolean setUp = SteamSetup.isSetUp(current, SteamSetup.script(os));
+        boolean oldCopy = SteamSetup.startsOldCopy(current, SteamSetup.script(os), System.getenv());
         boolean jumpstart = current.map(SteamSetup::hasJumpstart).orElse(false);
         boolean jumpstartAgent = SteamSetup.jumpstartAgent(platform, current);
         String loader = jumpstartAgent ? "Jumpstart" : "ZombieBuddy";
@@ -50,6 +51,8 @@ final class SteamSetupDialog {
 
         JLabel status = html(setUp
                 ? "✔ Already set up. BiteCheck runs whenever you start Project Zomboid from Steam."
+                : oldCopy ? "Your launch options start the old BiteCheck in your user folder. Replace them with the "
+                        + "line below; BiteCheck then removes the old copy."
                 : "Not set up yet. Right now BiteCheck only checks when you open it yourself.");
         status.setForeground(setUp ? th.ok : th.warn);
         status.setFont(th.bold(1f));

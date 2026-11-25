@@ -6,6 +6,7 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
@@ -76,9 +77,21 @@ public final class SteamSetup {
      *                       no ZombieBuddy option; zbNative would not even be there to load
      */
     public static String launchOptions(Platform.Os os, Path script, Optional<String> current, boolean jumpstartAgent) {
+        return launchOptions(os, script, current, jumpstartAgent, System.getenv());
+    }
+
+    static String launchOptions(Platform.Os os, Path script, Optional<String> current, boolean jumpstartAgent,
+            Map<String, String> env) {
         String prefix = quote(script.toString()) + " " + WRAP + " ";
         String existing = current.map(String::strip).orElse("");
         if (hasOwnWrapper(existing)) {
+            if (startsOldCopy(current, script, env)) {
+                // the old copy in the player's folder: the same line, with the protected BiteCheck
+                Matcher m = OWN_WRAPPER.matcher(existing);
+                m.find();
+                int end = existing.indexOf('"', m.start() + 1) + 1;
+                return existing.substring(0, m.start()) + quote(script.toString()) + existing.substring(end);
+            }
             return existing; // already set up
         }
         if (existing.isEmpty()) {
@@ -131,6 +144,23 @@ public final class SteamSetup {
     /** True if the launch options already start BiteCheck. */
     public static boolean isSetUp(Optional<String> current) {
         return current.map(s -> hasOwnWrapper(s) && s.contains("%command%")).orElse(false);
+    }
+
+    /** True if the launch options start this BiteCheck ({@code script}), not the old copy it replaced. */
+    public static boolean isSetUp(Optional<String> current, Path script) {
+        return isSetUp(current) && !startsOldCopy(current, script, System.getenv());
+    }
+
+    /**
+     * True if this is the protected BiteCheck in Program Files and the launch options still start the
+     * old copy in the player's folder. That copy hands over to this one, but it stays installed (and
+     * changeable by programs running as the player) until the launch options name this one.
+     */
+    static boolean startsOldCopy(Optional<String> current, Path script, Map<String, String> env) {
+        Optional<Path> protectedDir = ProtectedInstall.protectedDir(env);
+        return protectedDir.isPresent()
+                && script.toAbsolutePath().normalize().startsWith(protectedDir.get().toAbsolutePath().normalize())
+                && ProtectedInstall.steamUsesOldCopy(current, env);
     }
 
     /** Project Zomboid's launch options from Steam's localconfig.vdf files (one per Steam account). */
@@ -209,8 +239,11 @@ public final class SteamSetup {
         s.append("asks about new mods as before.\n");
         if (first.isPresent()) {
             s.append("\nYour current launch options: ").append(first.get()).append('\n');
-            if (isSetUp(first)) {
+            if (isSetUp(first, script(os))) {
                 s.append("BiteCheck is already set up.\n");
+            } else if (startsOldCopy(first, script(os), System.getenv())) {
+                s.append("They start the old BiteCheck in your user folder. Replace them with the line above;\n"
+                        + "BiteCheck then removes the old copy.\n");
             }
         }
         if (os == Platform.Os.WINDOWS) {
