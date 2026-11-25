@@ -70,7 +70,7 @@ final class StartGate {
                 }
             }
             if (!session.startStoppers().isEmpty()) {
-                err.println("BiteCheck: ZombieBuddy is not allowed, so the game was not started.");
+                err.println("BiteCheck: " + loaderName(session) + " is not allowed, so the game was not started.");
                 return false;
             }
             return true;
@@ -89,7 +89,7 @@ final class StartGate {
         }
         session.replan().apply();
         if (!ok[0]) {
-            err.println("BiteCheck: ZombieBuddy is not allowed, so the game was not started.");
+            err.println("BiteCheck: " + loaderName(session) + " is not allowed, so the game was not started.");
         }
         return ok[0];
     }
@@ -101,10 +101,11 @@ final class StartGate {
     static boolean askAll(Component parent, Session session, Path biteCheckDir) {
         for (Planner.Row r : session.rows) {
             if (r.mod().isLoader() && hardBlocked(r)) {
-                JOptionPane.showMessageDialog(parent, "<html><b>ZombieBuddy is " + word(r) + "</b> and cannot be "
+                String loader = LauncherWindow.escape(r.mod().name());
+                JOptionPane.showMessageDialog(parent, "<html><b>" + loader + " is " + word(r) + "</b> and cannot be "
                         + "allowed:<br>" + LauncherWindow.escape(r.info()) + "<br><br>The game does not start with it. "
-                        + "Install ZombieBuddy again from its official source.</html>",
-                        "ZombieBuddy blocked", JOptionPane.ERROR_MESSAGE);
+                        + "Install " + loader + " again from its official source.</html>",
+                        r.mod().name() + " blocked", JOptionPane.ERROR_MESSAGE);
                 return false;
             }
         }
@@ -152,7 +153,7 @@ final class StartGate {
             }
         }
         String what = q.mod().isLoader()
-                ? "ZombieBuddy loads every Java mod. If you say no, the game does not start."
+                ? name + " loads every Java mod. If you say no, the game does not start."
                 : "Java mods can access your whole computer. If you say no, the game starts without this mod.";
         if (!q.risky()) {
             int answer = JOptionPane.showConfirmDialog(parent, "<html><b>" + name + "</b> is not reviewed yet:<br>"
@@ -178,6 +179,12 @@ final class StartGate {
                         + LauncherWindow.escape(stateFile.toString()) + "</html>",
                 "Confirm", JOptionPane.WARNING_MESSAGE);
         return "ALLOW".equals(typed == null ? null : typed.strip());
+    }
+
+    /** The mod loader's name for messages: ZombieBuddy, or Jumpstart with ZombieBuddy built in. */
+    static String loaderName(Session session) {
+        return session.rows.stream().filter(r -> r.mod().isLoader()).map(r -> r.mod().name()).findFirst()
+                .orElse("ZombieBuddy");
     }
 
     static boolean hardBlocked(Planner.Row r) {

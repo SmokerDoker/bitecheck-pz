@@ -22,6 +22,7 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.Optional;
 import java.util.concurrent.ExecutionException;
 import javax.swing.BorderFactory;
 import javax.swing.Box;
@@ -419,9 +420,12 @@ final class LauncherWindow {
                     "Lua mods are loaded by the game itself; BiteCheck has nothing to check.");
             return;
         }
-        if (lines.stream().anyMatch(l -> l.mod().isLoader() && onStart(l.shown()).equals(NO_START))) {
-            setVerdict(Tone.PROBLEM, "✖", "ZombieBuddy is blocked. The game does not start with it.",
-                    "Select ZombieBuddy to see why, and install it again from its official source.");
+        Optional<ModLine> blockedLoader = lines.stream()
+                .filter(l -> l.mod().isLoader() && onStart(l.shown()).equals(NO_START)).findFirst();
+        if (blockedLoader.isPresent()) {
+            String loader = blockedLoader.get().mod().name();
+            setVerdict(Tone.PROBLEM, "✖", loader + " is blocked. The game does not start with it.",
+                    "Select " + loader + " to see why, and install it again from its official source.");
             return;
         }
         long blocked = lines.stream().filter(l -> onStart(l.shown()).startsWith("blocked")

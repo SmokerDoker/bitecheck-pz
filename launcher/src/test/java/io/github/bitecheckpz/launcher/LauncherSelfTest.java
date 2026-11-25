@@ -288,6 +288,53 @@ public final class LauncherSelfTest {
             Files.delete(game.resolve("ZombieBuddy.jar.new"));
             expect(w.session().startStoppers().isEmpty(), true);
         });
+        run("jumpstart: Jumpstart.jar in the game folder is the loader, checked like any mod", () -> {
+            World w = World.create();
+            Path game = w.root.resolve("game");
+            Files.createDirectories(game);
+            Files.writeString(w.biteCheck.resolve("config.toml"), Files.readString(w.biteCheck.resolve("config.toml"))
+                    + "game_dir = " + io.github.bitecheckpz.core.Toml.quote(game.toString()) + "\n");
+            w.mod(game, "JSTmp", "Jumpstart.jar", "jumpstart loader");
+            Path js = game.resolve("Jumpstart.jar");
+            Files.move(w.jars.get("Jumpstart.jar"), js);
+            w.jars.put("Jumpstart.jar", js);
+            // the fork's mod folder without a jar (Lua only) is no Java mod
+            Path zbFolder = w.root.resolve("Zomboid/mods/ZombieBuddy/42");
+            Files.createDirectories(zbFolder);
+            Files.writeString(zbFolder.resolve("mod.info"), "name=ZombieBuddy\nid=ZombieBuddy\n");
+            Session s = w.session();
+            Planner.Row loader = row(s, "Jumpstart.jar");
+            expect(loader.mod().isLoader(), true);
+            expect(loader.mod().name(), "Jumpstart (with ZombieBuddy)");
+            expect(StartGate.loaderName(s), "Jumpstart (with ZombieBuddy)");
+            expect(loader.status(), Verifier.Status.UNVERIFIED);
+            expect(loader.stopsGame(), true);
+            expect(s.rows.stream().filter(r -> r.mod().isLoader()).count(), 1L);
+            expect(StartGate.questions(s).get(0).mod().isLoader(), true); // asked first
+            s.apply();
+            expect(ZombieBuddyApprovals.load(w.zb).decision(w.sha("Jumpstart.jar")), null); // not its own approval
+            s.state.allowedAnyway().put(w.sha("Jumpstart.jar"), "test");
+            expect(row(s.replan(), "Jumpstart.jar").stopsGame(), false);
+            // no .new file for Jumpstart: it updates through its installer
+            Files.writeString(game.resolve("Jumpstart.jar.new"), "not a thing");
+            expect(w.session().rows.stream().anyMatch(r -> r.jar().path().getFileName().toString()
+                    .equals("Jumpstart.jar.new")), false);
+            Files.delete(game.resolve("Jumpstart.jar.new"));
+            // an old ZombieBuddy.jar next to it is checked as well, under one loader
+            Files.writeString(game.resolve("ZombieBuddy.jar"), "old upstream copy");
+            Session both = w.session();
+            expect(both.rows.stream().filter(r -> r.mod().isLoader()).count(), 2L);
+            expect(row(both, "Jumpstart.jar").mod().name(), "Jumpstart and ZombieBuddy");
+            Files.delete(game.resolve("ZombieBuddy.jar"));
+            // blocked: never allowed, the game does not start
+            w.publishIndex(Instant.now().plusSeconds(60), Map.of("blocked", w.sha("Jumpstart.jar")));
+            Session blocked = w.session();
+            expect(row(blocked, "Jumpstart.jar").stopsGame(), true);
+            expect(row(blocked, "Jumpstart.jar").undecided(), false);
+            // verified: starts without a question
+            w.publishIndex(Instant.now().plusSeconds(120), Map.of("verified", w.sha("Jumpstart.jar")));
+            expect(w.session().startStoppers().isEmpty(), true);
+        });
         run("update hint: Steam update, change without update, version numbers", () -> {
             Path dir = Files.createTempDirectory("bc-hint");
             Path jar = dir.resolve("Mod/42/media/java/m.jar");
@@ -602,6 +649,18 @@ public final class LauncherSelfTest {
             expect(SteamSetup.launchOptions(Platform.Os.WINDOWS, script, java.util.Optional.of(both)), both);
             expect(SteamSetup.isSetUp(java.util.Optional.of("\"C:\\Program Files\\BiteCheck\\BiteCheck.exe\" --wrap %command%")), true);
             expect(SteamSetup.isSetUp(java.util.Optional.of("\"/Applications/BiteCheck.app/Contents/MacOS/BiteCheck\" --wrap %command%")), true);
+            // Jumpstart.jar brings ZombieBuddy: no ZombieBuddy option is added, Jumpstart's own stays as it is
+            expect(SteamSetup.launchOptions(Platform.Os.WINDOWS, script, java.util.Optional.empty(), true),
+                    quoted + " --wrap %command%");
+            expect(SteamSetup.launchOptions(Platform.Os.LINUX, script, java.util.Optional.empty(), true),
+                    quoted + " --wrap %command%");
+            String agent = "-javaagent:Jumpstart.jar=hotswap=true --";
+            expect(SteamSetup.hasJumpstartAgent(agent), true);
+            expect(SteamSetup.hasJumpstartAgent("-javaagent:ZombieBuddy.jar --"), false);
+            expect(SteamSetup.launchOptions(Platform.Os.LINUX, script, java.util.Optional.of(agent), true),
+                    quoted + " --wrap %command% " + agent);
+            expect(SteamSetup.undo(Platform.Os.WINDOWS, true).contains("zbNative"), false);
+            expect(SteamSetup.undo(Platform.Os.WINDOWS, false).contains("zbNative"), true);
         });
         run("wrap: applies the decisions, runs the game command and passes its exit code", () -> {
             World w = World.create();

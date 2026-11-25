@@ -32,7 +32,9 @@ final class SteamSetupDialog {
         Optional<String> current = SteamSetup.currentLaunchOptions(platform).stream().findFirst();
         boolean setUp = SteamSetup.isSetUp(current);
         boolean jumpstart = current.map(SteamSetup::hasJumpstart).orElse(false);
-        String line = SteamSetup.launchOptions(os, SteamSetup.script(os), current);
+        boolean jumpstartAgent = SteamSetup.jumpstartAgent(platform, current);
+        String loader = jumpstartAgent ? "Jumpstart" : "ZombieBuddy";
+        String line = SteamSetup.launchOptions(os, SteamSetup.script(os), current, jumpstartAgent);
 
         Theme th = Theme.get();
         JDialog dialog = new JDialog(owner, "Steam setup", true);
@@ -106,8 +108,8 @@ final class SteamSetupDialog {
         add(body, separator, 10);
 
         add(body, note("<b>How it works:</b> Steam starts BiteCheck first. It checks your Java mods, tells "
-                + "ZombieBuddy which ones may load, then starts the game. If BiteCheck itself fails, the game "
-                + "still starts and ZombieBuddy asks about new mods as before."), 8);
+                + loader + " which ones may load, then starts the game. If BiteCheck itself fails, the game "
+                + "still starts and " + loader + " asks about new mods as before."), 8);
         if (jumpstart) {
             add(body, note("<b>Jumpstart</b>&nbsp;is in your launch options too. It runs first and only updates "
                     + "itself; BiteCheck checks your mods right after that, before the game loads any of them."), 8);
@@ -119,8 +121,11 @@ final class SteamSetupDialog {
         if (current.isPresent() && !setUp) {
             add(body, note("Your current launch options are kept in the line above."), 8);
         }
-        add(body, note("<b>To undo:</b> put back your old launch options. For ZombieBuddy alone that is "
-                + "<code>" + SteamSetup.zombieBuddyOption(os) + "</code>"), 4);
+        add(body, note(jumpstartAgent
+                ? "<b>To undo:</b> remove BiteCheck's part, everything up to and including <code>"
+                        + SteamSetup.WRAP + "</code>. Keep <code>%command%</code> and what follows."
+                : "<b>To undo:</b> put back your old launch options. For ZombieBuddy alone that is "
+                        + "<code>" + SteamSetup.zombieBuddyOption(os) + "</code>"), 4);
 
         JButton close = new Ui.Button("Close", setUp ? Ui.Kind.PRIMARY : Ui.Kind.SECONDARY);
         close.addActionListener(e -> dialog.dispose());

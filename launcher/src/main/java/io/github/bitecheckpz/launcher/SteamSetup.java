@@ -67,13 +67,22 @@ public final class SteamSetup {
      * @param current the current launch options for Project Zomboid, if known
      */
     public static String launchOptions(Platform.Os os, Path script, Optional<String> current) {
+        return launchOptions(os, script, current, false);
+    }
+
+    /**
+     * @param jumpstartAgent Jumpstart.jar is in the game folder: it brings ZombieBuddy and sets its
+     *                       own agent option (on Windows in ProjectZomboid64.json), so BiteCheck adds
+     *                       no ZombieBuddy option; zbNative would not even be there to load
+     */
+    public static String launchOptions(Platform.Os os, Path script, Optional<String> current, boolean jumpstartAgent) {
         String prefix = quote(script.toString()) + " " + WRAP + " ";
         String existing = current.map(String::strip).orElse("");
         if (hasOwnWrapper(existing)) {
             return existing; // already set up
         }
         if (existing.isEmpty()) {
-            return prefix + "%command% " + zombieBuddyOption(os);
+            return jumpstartAgent ? prefix + "%command%" : prefix + "%command% " + zombieBuddyOption(os);
         }
         if (existing.contains("%command%")) {
             // e.g. a wrapper the player already uses: put BiteCheck directly in front of the game
@@ -100,6 +109,23 @@ public final class SteamSetup {
 
     static boolean hasJumpstart(String options) {
         return JUMPSTART_WRAPPER.matcher(options).find();
+    }
+
+    /** Jumpstart's own agent option ({@code -javaagent:Jumpstart.jar...}), which BiteCheck keeps as it is. */
+    static boolean hasJumpstartAgent(String options) {
+        return options.contains("-javaagent:" + JavaMods.JUMPSTART_JAR);
+    }
+
+    /** True if Jumpstart (with ZombieBuddy built in) is the mod loader here. */
+    public static boolean jumpstartAgent(Platform platform, Optional<String> current) {
+        return JavaMods.hasJumpstart(platform) || current.map(SteamSetup::hasJumpstartAgent).orElse(false);
+    }
+
+    /** How to undo BiteCheck's launch options. */
+    static String undo(Platform.Os os, boolean jumpstartAgent) {
+        return jumpstartAgent
+                ? "remove BiteCheck's part, everything up to and including " + WRAP + "; keep %command% and what follows"
+                : "for ZombieBuddy: " + zombieBuddyOption(os);
     }
 
     /** True if the launch options already start BiteCheck. */
@@ -171,13 +197,15 @@ public final class SteamSetup {
         Platform.Os os = platform.os();
         List<String> current = currentLaunchOptions(platform);
         Optional<String> first = current.stream().findFirst();
+        boolean jumpstart = jumpstartAgent(platform, first);
+        String loader = jumpstart ? "Jumpstart" : "ZombieBuddy";
         StringBuilder s = new StringBuilder();
         s.append("To check your Java mods every time you start Project Zomboid from Steam:\n\n");
         s.append("1. In Steam, right-click Project Zomboid > Properties > General > Launch Options.\n");
         s.append("2. Replace the text there with this line:\n\n");
-        s.append("   ").append(launchOptions(os, script(os), first)).append("\n\n");
-        s.append("BiteCheck then runs before the game, writes its decisions for ZombieBuddy and starts\n");
-        s.append("the game as usual. If BiteCheck itself fails, the game still starts and ZombieBuddy\n");
+        s.append("   ").append(launchOptions(os, script(os), first, jumpstart)).append("\n\n");
+        s.append("BiteCheck then runs before the game, writes its decisions for " + loader + " and starts\n");
+        s.append("the game as usual. If BiteCheck itself fails, the game still starts and " + loader + "\n");
         s.append("asks about new mods as before.\n");
         if (first.isPresent()) {
             s.append("\nYour current launch options: ").append(first.get()).append('\n');
@@ -188,8 +216,7 @@ public final class SteamSetup {
         if (os == Platform.Os.WINDOWS) {
             s.append("\nWindows: a console window stays open while the game runs; that is BiteCheck waiting.\n");
         }
-        s.append("\nTo undo: put back your old launch options (for ZombieBuddy: ").append(zombieBuddyOption(os))
-                .append(").\n");
+        s.append("\nTo undo: put back your old launch options (").append(undo(os, jumpstart)).append(").\n");
         return s.toString();
     }
 }

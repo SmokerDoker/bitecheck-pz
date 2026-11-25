@@ -8,7 +8,7 @@ you can do on your computer, including changing BiteCheck itself.
 
 **What BiteCheck does**
 
-- Every Java mod jar, and ZombieBuddy's own jar, is checked before the game starts. A jar loads
+- Every Java mod jar, and ZombieBuddy's own jar (or Jumpstart.jar, which has ZombieBuddy built in), is checked before the game starts. A jar loads
   without a question only if its exact SHA-256 hash was rebuilt from public source by CI and
   approved by a reviewer, in a registry signed with keys that only CI holds.
 - Every other jar loads only after you allowed it in BiteCheck: one question for an unverified
