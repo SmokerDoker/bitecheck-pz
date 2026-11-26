@@ -237,6 +237,18 @@ public final class SelfTest {
             expect(f.verify().status(), Verifier.Status.INVALID); // alice signed evil herself: her key counts as revoked
             expect(f.registry().revocation("authors", "alice").orElse("").contains("confirmed malware"), true);
         });
+        run("lint: no symbolic links in the registry", () -> {
+            Fixture f = Fixture.create();
+            Files.createDirectories(f.modDir.resolve("flags"));
+            Path link = f.modDir.resolve("flags/linked.toml");
+            try {
+                Files.createSymbolicLink(link, f.reviewFile("bob"));
+            } catch (UnsupportedOperationException | IOException e) {
+                return; // this system does not let us create links (Windows without the right); CI on Linux does
+            }
+            expect(Lint.check(f.registry(), java.util.Optional.of(f.registryKey)).stream()
+                    .anyMatch(e -> e.contains("symbolic links are not allowed")), true);
+        });
         run("flags: a reporter whose flags were abuse no longer warns anyone", () -> {
             Fixture f = Fixture.create();
             Files.createDirectories(f.modDir.resolve("flags"));

@@ -547,7 +547,10 @@ final class AccountCommands {
             String path = line.substring(line.indexOf('\t') + 1);
             Matcher m = modPath.matcher(path);
             Matcher k = authorKey.matcher(path);
-            if (m.matches()) {
+            if (!change.equals("D") && Files.isSymbolicLink(root.resolve(path))) {
+                // a link would let a later change of its target (e.g. one's own review) change this file unseen
+                maintainer.add(path + ": a symbolic link");
+            } else if (m.matches()) {
                 String rest = m.group(2);
                 Matcher r = review.matcher(rest);
                 if (rest.startsWith("flags/")) {
