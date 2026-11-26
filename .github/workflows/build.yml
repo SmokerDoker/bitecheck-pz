@@ -26,6 +26,10 @@ jobs:
           java-version: "21"
       - name: Build and run self tests
         run: ./gradlew --no-daemon check :cli:installDist :launcher:launcherZip
+      - name: The real registry with this build of bcz (what the Registry workflow runs after a merge)
+        run: |
+          cli/build/install/bcz/bin/bcz lint --registry-key keys/registry.pub
+          cli/build/install/bcz/bin/bcz index --registry-key keys/registry.pub --out "$RUNNER_TEMP/index.toml"
       - name: Check that the build is reproducible
         run: |
           sha256sum cli/build/libs/*.jar core/build/libs/*.jar launcher/build/libs/*.jar > first.sha256

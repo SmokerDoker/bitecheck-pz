@@ -108,7 +108,7 @@ A review names either one jar (`jar_sha256`) or the whole build record (`build_s
 
 ```toml
 [compat]
-game = ">=42.13, <43"     # Project Zomboid
+project_zomboid = ">=42.13, <43"
 zombiebuddy = ">=2.3"
 ```
 

@@ -11,7 +11,7 @@ import java.util.regex.Pattern;
  *
  * <pre>
  * [compat]
- * game = "&gt;=42.13, &lt;43"
+ * project_zomboid = "&gt;=42.13, &lt;43"
  * zombiebuddy = "&gt;=2.3"
  * </pre>
  *
@@ -23,6 +23,12 @@ import java.util.regex.Pattern;
 public final class Compat {
     /** The fields of {@code [compat]} and what they name. */
     public static final Map<String, String> FIELDS = Map.of("game", "Project Zomboid", "zombiebuddy", "ZombieBuddy");
+
+    /**
+     * The field names a release file may use in {@code [compat]}: {@code project_zomboid} (the
+     * release format's name) or {@code game} (the same), and {@code zombiebuddy}.
+     */
+    public static final java.util.Set<String> RELEASE_FIELDS = java.util.Set.of("project_zomboid", "game", "zombiebuddy");
 
     private static final Pattern CONDITION = Pattern.compile("\\s*(>=|<=|>|<|=)?\\s*(\\d+(?:\\.\\d+){0,3})\\s*");
 
@@ -109,6 +115,9 @@ public final class Compat {
         List<String> parts = new ArrayList<>();
         for (String field : List.of("game", "zombiebuddy")) {
             String range = Toml.string(compat, field);
+            if (range == null && field.equals("game")) {
+                range = Toml.string(compat, "project_zomboid"); // the field's name in release files
+            }
             if (isValid(range)) {
                 parts.add(field + " " + range.replace(" ", ""));
             }
