@@ -554,6 +554,19 @@ final class AccountCommands {
                     // Anyone may raise a flag; changing or removing one is a maintainer's decision.
                     if (!change.equals("A")) {
                         maintainer.add(path + ": changes or removes a flag");
+                    } else if (path.endsWith(".toml")) {
+                        // A new flag is "open": only a maintainer decides that it is confirmed malware
+                        // (which blocks, revokes the author's key and demotes reviewers), resolved or abuse.
+                        Map<String, Object> flag = Toml.parse(root.resolve(path));
+                        if (!"open".equals(Toml.string(flag, "status"))) {
+                            maintainer.add(path + ": a new flag with status '" + Toml.string(flag, "status")
+                                    + "' (only maintainers decide flags)");
+                        }
+                        // whoever it names as reporter must be the one who raises it
+                        String reporter = Toml.string(flag, "reported_by");
+                        if (reporter != null) {
+                            owner(path, reporter, login, baseAccounts, headAccounts, errors);
+                        }
                     }
                 } else if (r.matches()) {
                     owner(path, r.group(1), login, baseAccounts, headAccounts, errors);
