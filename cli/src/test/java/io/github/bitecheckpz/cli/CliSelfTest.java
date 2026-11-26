@@ -178,6 +178,8 @@ public final class CliSelfTest {
             identity(w.source);
             Files.createDirectories(w.source.resolve(JAR).getParent());
             Files.writeString(w.source.resolve(JAR), "jar v1");
+            // the source that stays the same: the update below changes a small part of the code
+            Files.writeString(w.source.resolve("Main.java"), "// line\n".repeat(40));
             git(w.source, "add", "-A");
             git(w.source, "commit", "-q", "-m", "v1");
             String commit1 = git(w.source, "rev-parse", "HEAD");

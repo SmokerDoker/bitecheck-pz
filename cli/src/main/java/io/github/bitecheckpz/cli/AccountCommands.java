@@ -84,6 +84,78 @@ final class AccountCommands {
         return Main.OK;
     }
 
+    // ---- rotate-key ----
+
+    /**
+     * Replaces an author's key without a maintainer: a new key pair, signed by the old key. The old
+     * public key stays in {@code keys/authors/<name>.previous/} so earlier releases stay verified; the
+     * old private key is kept as {@code ~/.bitecheck/keys/<name>.<old id>.key}. Opens a pull request.
+     */
+    static int rotateKey(Args a, PrintStream out) throws IOException, GeneralSecurityException, InterruptedException,
+            UsageException {
+        String me = ModCommands.me(a);
+        Registry.requireName(me, "name");
+        Path keys = ModCommands.home().resolve("keys");
+        Path privateFile = keys.resolve(me + ".key");
+        Keys.PrivateKeyInfo old = Keys.readPrivate(privateFile);
+        PublicKey oldPublic = Keys.publicKey(old.key());
+        String oldId = Keys.keyId(oldPublic);
+        String github = Exec.gh(null, "api", "user", "--jq", ".login");
+        String upstream = upstream(a);
+        Path work = ModCommands.home().resolve("submit").resolve("rotate-" + me);
+        deleteTree(work);
+        Files.createDirectories(work.getParent());
+        Exec.git(null, "clone", "--quiet", "https://github.com/" + upstream + ".git", work.toString());
+        Path registered = work.resolve("keys/authors/" + me + ".pub");
+        if (!Files.isRegularFile(registered) || !Keys.readPublic(registered).id().equals(oldId)) {
+            throw new IOException("'" + me + "' is not registered with your key " + oldId + " as an author");
+        }
+
+        KeyPair pair = Keys.generate();
+        String newId = Keys.keyId(pair.getPublic());
+        Path previous = work.resolve("keys/authors/" + me + ".previous/" + oldId + ".pub");
+        Files.createDirectories(previous.getParent());
+        Files.copy(registered, previous);
+        Files.writeString(registered, Keys.encodePublic(pair.getPublic(), me), StandardCharsets.UTF_8);
+        Signatures.sign(registered, old); // the old key vouches for the new one
+        // the releases the old key signed: it keeps counting for exactly these, never for new ones
+        Keys.PublicKeyInfo oldInfo = Keys.readPublic(previous);
+        List<String> signed = new ArrayList<>();
+        try (Stream<Path> files = Files.walk(work.resolve("registry/mods"))) {
+            for (Path f : files.filter(p -> p.getParent() != null && p.getParent().getFileName().toString().equals("releases")
+                    && p.toString().endsWith(".toml") && !p.toString().endsWith(".build.toml")).sorted().toList()) {
+                if (Signatures.verify(f, oldInfo) == Signatures.Check.VALID) {
+                    signed.add(Hashing.sha256Hex(f));
+                }
+            }
+        }
+        Path releases = previous.resolveSibling(oldId + ".releases");
+        Files.writeString(releases, signed.isEmpty() ? "" : String.join("\n", signed) + "\n", StandardCharsets.UTF_8);
+        Signatures.sign(releases, old);
+        List<String> problems = Lint.check(new Registry(work), new Registry(work).registryKey()).stream()
+                .filter(p -> p.startsWith("keys/")).toList();
+        if (!problems.isEmpty()) {
+            throw new IOException("the key change is not valid:\n  " + String.join("\n  ", problems));
+        }
+
+        // locally: keep the old private key, the new one becomes the one bcz signs with
+        Files.move(privateFile, keys.resolve(me + "." + oldId + ".key"));
+        Keys.writePrivate(privateFile, pair.getPrivate(), newId);
+        Files.writeString(keys.resolve(me + ".pub"), Keys.encodePublic(pair.getPublic(), me), StandardCharsets.UTF_8);
+
+        Exec.git(work, "add", "--", "keys/authors/" + me + ".pub", "keys/authors/" + me + ".pub.sig",
+                "keys/authors/" + me + ".previous/" + oldId + ".pub",
+                "keys/authors/" + me + ".previous/" + oldId + ".releases",
+                "keys/authors/" + me + ".previous/" + oldId + ".releases.sig");
+        Exec.git(work, "-c", "user.name=" + github, "-c", "user.email=" + github + "@users.noreply.github.com",
+                "commit", "--quiet", "-m", "Key change for " + me + ": " + oldId + " -> " + newId);
+        String url = PullRequests.open(work, upstream, "Key change for " + me,
+                "New author key " + newId + " for '" + me + "', signed by the old key " + oldId
+                        + " (`bcz rotate-key` by @" + github + "). Earlier releases stay verified with the old key.");
+        out.println("New key " + newId + " (old key kept as " + keys.resolve(me + "." + oldId + ".key") + "): " + url);
+        return Main.OK;
+    }
+
     // ---- submit ----
 
     /**
@@ -323,10 +395,32 @@ final class AccountCommands {
             return Main.ERROR;
         }
 
-        // CI's jars: the artifacts of the build jobs (kept 30 days), checked against the build record.
+        // CI's jars: first the registry's mirror (a GitHub release kept for good), then the artifacts of
+        // the build jobs (kept 30 days); every jar is checked against the signed build record.
         String key = (id + "-" + version).replaceAll("[^A-Za-z0-9.-]", "-");
         Path tmp = Files.createTempDirectory("bcz-fetch");
         try {
+            Path mirror = tmp.resolve("mirror");
+            Files.createDirectories(mirror);
+            if (Exec.run(null, "gh", "release", "download", "mod-" + id + "-" + version, "-R", upstream,
+                    "-D", mirror.toString(), "-p", "*.jar").code() == 0) {
+                Map<Integer, Path> found = new TreeMap<>();
+                for (int i : differ) {
+                    Path jar = mirror.resolve(id + "-" + version + "-" + i + ".jar");
+                    if (Files.isRegularFile(jar) && hashes.get(i).equals(Hashing.sha256Hex(jar))) {
+                        found.put(i, jar);
+                    }
+                }
+                if (found.size() == differ.size()) {
+                    for (int i : differ) {
+                        Path local = project.resolve(paths.get(i));
+                        Files.createDirectories(local.getParent());
+                        Files.copy(found.get(i), local, StandardCopyOption.REPLACE_EXISTING);
+                    }
+                    out.println("Replaced with the verified build (from the registry's mirror).");
+                    return Main.OK;
+                }
+            }
             for (String builder : List.of("a", "b")) {
                 String urls = Exec.gh(null, "api", "repos/" + upstream + "/actions/artifacts?per_page=20&name=build-"
                         + builder + "-" + key, "--jq", ".artifacts[] | select(.expired | not) | .archive_download_url");
@@ -463,6 +557,10 @@ final class AccountCommands {
                     }
                 } else if (r.matches()) {
                     owner(path, r.group(1), login, baseAccounts, headAccounts, errors);
+                } else if (rest.matches("(rebuilds|exceptions)/[^/]+/[a-z0-9-]+\\.toml(\\.sig)?")) {
+                    // a volunteer's rebuild record, or a trusted reviewer's exception: their own files
+                    String file = rest.substring(rest.lastIndexOf('/') + 1);
+                    owner(path, file.substring(0, file.indexOf('.')), login, baseAccounts, headAccounts, errors);
                 } else if (rest.matches("releases/[^/]+\\.build\\.toml(\\.sig)?")) {
                     maintainer.add(path + ": build records are written by CI");
                 } else if (rest.equals("mod.toml") || release.matcher(rest).matches()) {
@@ -471,14 +569,53 @@ final class AccountCommands {
                         modInfo = Toml.parse(root.resolve("registry/mods/" + m.group(1) + "/mod.toml"));
                     }
                     owner(path, Registry.signer(modInfo), login, baseAccounts, headAccounts, errors);
+                    // an author submitting their own mod must own its source repository on GitHub
+                    String source = String.valueOf(Toml.string(modInfo, "source"));
+                    Matcher repo = GITHUB_REPO.matcher(source);
+                    if (Toml.string(modInfo, "publisher") == null && repo.find()
+                            && !repo.group(1).equalsIgnoreCase(login)) {
+                        maintainer.add(path + ": the source " + source + " belongs to " + repo.group(1) + ", not to " + login);
+                    }
                 } else {
                     maintainer.add(path);
                 }
             } else if (k.matches()) {
                 if (Exec.tryGit(root, "cat-file", "-e", base + ":" + path).code() == 0) {
-                    maintainer.add(path + ": replaces a registered key");
+                    if (rotatedByOldKey(root, base, k.group(1))) {
+                        owner(path, k.group(1), login, baseAccounts, headAccounts, errors); // bcz rotate-key
+                    } else {
+                        maintainer.add(path + ": replaces a registered key");
+                    }
                 } else {
                     owner(path, k.group(1), login, baseAccounts, headAccounts, errors);
+                }
+            } else if (path.matches("keys/authors/[a-z0-9-]+\\.pub\\.sig")) {
+                String name = path.substring("keys/authors/".length(), path.length() - ".pub.sig".length());
+                if (change.equals("D") || !rotatedByOldKey(root, base, name)) {
+                    maintainer.add(path + ": a key change that the old key did not sign");
+                } else {
+                    owner(path, name, login, baseAccounts, headAccounts, errors);
+                }
+            } else if (path.matches("keys/authors/[a-z0-9-]+\\.previous/[0-9a-f]{16}\\.releases(\\.sig)?")) {
+                // the releases the old key signed before the change: only release files that exist on
+                // the base branch may be listed (the old key then counts for exactly those)
+                String name = path.substring("keys/authors/".length(), path.indexOf(".previous/"));
+                Path list = root.resolve(path.endsWith(".sig") ? path.substring(0, path.length() - 4) : path);
+                if (change.equals("A") && Files.isRegularFile(list) && listedReleasesExistOnBase(root, base, list)) {
+                    owner(path, name, login, baseAccounts, headAccounts, errors);
+                } else {
+                    maintainer.add(path + ": lists releases that are not on the base branch");
+                }
+            } else if (path.matches("keys/authors/[a-z0-9-]+\\.previous/[0-9a-f]{16}\\.pub")) {
+                String name = path.substring("keys/authors/".length(), path.indexOf(".previous/"));
+                // only the key that was registered before the change may become a previous key
+                var was = Exec.tryGit(root, "show", base + ":keys/authors/" + name + ".pub");
+                boolean same = change.equals("A") && was.code() == 0
+                        && was.output().strip().equals(Files.readString(root.resolve(path)).strip());
+                if (same) {
+                    owner(path, name, login, baseAccounts, headAccounts, errors);
+                } else {
+                    maintainer.add(path + ": not the key that was registered before");
                 }
             } else if (path.equals("keys/accounts.toml")) {
                 Map<String, Object> before = Toml.table(baseAccounts, "accounts");
@@ -509,6 +646,52 @@ final class AccountCommands {
                 : !maintainer.isEmpty() ? "needs a maintainer: the files above do not belong to " + login
                 : "OK: every change belongs to " + login);
         return errors.isEmpty() && maintainer.isEmpty() ? Main.OK : Main.ERROR;
+    }
+
+    /**
+     * True if the pull request's new {@code keys/authors/<name>.pub} is signed ({@code .pub.sig}) by
+     * the key registered for that name on the base branch: the author changed keys with the old one.
+     */
+    static boolean rotatedByOldKey(Path root, String base, String name) throws IOException, InterruptedException {
+        var was = Exec.tryGit(root, "show", base + ":keys/authors/" + name + ".pub");
+        Path pub = root.resolve("keys/authors/" + name + ".pub");
+        if (was.code() != 0 || !Files.isRegularFile(pub) || !Files.isRegularFile(Signatures.signaturePath(pub))) {
+            return false;
+        }
+        Path old = Files.createTempFile("bcz-old-key", ".pub");
+        try {
+            Files.writeString(old, was.output() + "\n", StandardCharsets.UTF_8);
+            Keys.PublicKeyInfo oldKey = Keys.readPublic(old);
+            Registry registry = new Registry(root);
+            // a revoked key, or the key of an author of confirmed malware, cannot vouch for a new one:
+            // such a change goes to a maintainer
+            if (registry.isRevokedKey(oldKey) || registry.malwareAuthors().contains(name)) {
+                return false;
+            }
+            return Signatures.verify(pub, oldKey) == Signatures.Check.VALID;
+        } catch (Exception e) {
+            return false;
+        } finally {
+            Files.deleteIfExists(old);
+        }
+    }
+
+    /** True if every SHA-256 in the list is the hash of a release file on the base branch. */
+    static boolean listedReleasesExistOnBase(Path root, String base, Path list) throws IOException, InterruptedException {
+        java.util.Set<String> onBase = new java.util.HashSet<>();
+        for (String path : Exec.git(root, "ls-tree", "-r", "--name-only", base, "registry/mods").lines().toList()) {
+            if (path.matches("registry/mods/[^/]+/releases/[^/]+\\.toml") && !path.endsWith(".build.toml")) {
+                onBase.add(Hashing.sha256Hex(Exec.git(root, "show", base + ":" + path).concat("\n").getBytes(StandardCharsets.UTF_8)));
+                onBase.add(Hashing.sha256Hex(Exec.git(root, "show", base + ":" + path).getBytes(StandardCharsets.UTF_8)));
+            }
+        }
+        for (String line : Files.readAllLines(list)) {
+            String sha = line.strip();
+            if (!sha.isEmpty() && !onBase.contains(sha)) {
+                return false;
+            }
+        }
+        return true;
     }
 
     /** The name's GitHub account must be the pull request's author; the base registry wins over the PR. */
@@ -585,6 +768,9 @@ final class AccountCommands {
         }
         Map<String, int[]> counts = new TreeMap<>();
         Map<String, String> last = new TreeMap<>();
+        Map<String, String> first = new TreeMap<>();
+        // approvals per release, to tell which reviews a trusted reviewer confirmed
+        Map<String, List<String>> approvers = new TreeMap<>();
         if (Files.isDirectory(registry.modsDir())) {
             try (Stream<Path> files = Files.walk(registry.modsDir())) {
                 for (Path f : files.filter(p -> p.toString().endsWith(".toml")
@@ -596,16 +782,46 @@ final class AccountCommands {
                     c[1] += "approve".equals(Toml.string(review, "verdict")) ? 1 : 0;
                     String at = String.valueOf(Toml.string(review, "reviewed_at"));
                     last.merge(who, at, (x, y) -> x.compareTo(y) > 0 ? x : y);
+                    first.merge(who, at, (x, y) -> x.compareTo(y) < 0 ? x : y);
+                    if ("approve".equals(Toml.string(review, "verdict"))) {
+                        approvers.computeIfAbsent(Toml.string(review, "mod") + "@" + Toml.string(review, "version"),
+                                k -> new ArrayList<>()).add(who);
+                    }
                 }
             }
         }
+        // KONZEPTION: reviewer after 5 reviews a trusted reviewer confirmed (approved the same
+        // release); trusted after 25 and 6 months, confirmed by two maintainers (bcz trust)
+        Map<String, Integer> confirmed = new TreeMap<>();
+        for (List<String> who : approvers.values()) {
+            for (String name : who) {
+                boolean byTrusted = false;
+                for (String other : who) {
+                    if (!other.equals(name) && registry.reviewerLevel(other).equals("trusted")) {
+                        byTrusted = true;
+                    }
+                }
+                if (byTrusted) {
+                    confirmed.merge(name, 1, Integer::sum);
+                }
+            }
+        }
+        String sixMonthsAgo = java.time.Instant.now().minus(java.time.Duration.ofDays(183)).toString();
         for (String name : names) {
             int[] c = counts.getOrDefault(name, new int[2]);
+            String level = registry.reviewerLevel(name);
+            int ok = confirmed.getOrDefault(name, 0);
+            String since = first.getOrDefault(name, "9999");
+            String next = level.equals("new") && ok >= 5 ? "  -> can become reviewer (" + ok + " confirmed reviews)"
+                    : level.equals("reviewer") && ok >= 25 && since.compareTo(sixMonthsAgo) <= 0
+                            ? "  -> can become trusted (" + ok + " confirmed, active since " + since.substring(0, 10)
+                                    + "; two maintainers confirm)"
+                            : "";
             String state = registry.reviewerKey(name).isEmpty() ? "  (key revoked)" : "";
             out.printf("%-20s %-9s %3d reviews, %3d approved  last %-10s  GitHub %s%s%n", name,
                     registry.reviewerLevel(name), c[0], c[1],
                     last.containsKey(name) ? last.get(name).substring(0, Math.min(10, last.get(name).length())) : "-",
-                    registry.githubAccount(name).orElse("-"), state);
+                    registry.githubAccount(name).orElse("-"), state + next);
         }
         return Main.OK;
     }

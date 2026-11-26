@@ -49,6 +49,17 @@ public final class Main {
               bcz reject <mod> [version] --notes <text>
                   Write and sign your review of the release's build record. --scope diff: you reviewed
                   only the changes since the previous release, which must be verified.
+              bcz rebuild <mod> [version] --game-dir <game folder>
+                  Volunteers: build the release from source yourself; if the jar is identical to CI's,
+                  a signed rebuild record goes into the registry. Runs the mod's build: use a VM.
+              bcz note <jar|sha256> --findings <text> [--name <text>]
+                  Reviewers: findings on a closed-source jar (never code); shown in the launcher's warning.
+              bcz rotate-key [--as <name>]
+                  Authors: a new key, signed by your old one (opens a pull request). Earlier releases
+                  stay verified; the old private key is kept next to the new one.
+              bcz except <mod> [version] --reason <text> [--rules unsafe,process]
+                  Trusted reviewers: accept the scanner's hard findings of a release (from its build
+                  record). Without this exception the release is never verified.
               bcz flag <mod> [version] --notes <text> [--severity info|suspicion|critical]
                   Report a problem with a release. A critical flag warns every player.
                   These commands sign with ~/.bitecheck/keys/<name>.key (see 'bcz login', or --as <name>).
@@ -98,6 +109,8 @@ public final class Main {
                   Exit codes: 0 verified, 10 unverified, 11 flagged, 12 blocked, 13 invalid.
               bcz scan <jar> [--format text|markdown]
                   Scan a mod jar for APIs reviewers must check. Exit code 14 on hard findings.
+              bcz osv <jar> [--format text|markdown]
+                  Check the libraries the jar bundles against known vulnerabilities (OSV). Exit code 15 if any.
               bcz lint [--registry <dir>] [--registry-key <public-key>]
                   Check all registry files: names, fields, signatures.
               bcz release-info <release.toml> [--registry <dir>]
@@ -143,6 +156,7 @@ public final class Main {
                 case "review" -> review(parsed, out);
                 case "verify" -> verify(parsed, out, err);
                 case "scan" -> scan(parsed, out);
+                case "osv" -> osv(parsed, out);
                 case "lint" -> lint(parsed, out);
                 case "index" -> index(parsed, out);
                 case "timestamp" -> timestamp(parsed, out);
@@ -156,7 +170,11 @@ public final class Main {
                 case "approve" -> ModCommands.review(parsed, out, "approve");
                 case "reject" -> ModCommands.review(parsed, out, "reject");
                 case "flag" -> ModCommands.flag(parsed, out);
+                case "except" -> ModCommands.except(parsed, out);
+                case "note" -> ModCommands.note(parsed, out);
+                case "rebuild" -> ModCommands.rebuild(parsed, out);
                 case "login" -> AccountCommands.login(parsed, out);
+                case "rotate-key" -> AccountCommands.rotateKey(parsed, out);
                 case "submit" -> AccountCommands.submit(parsed, out);
                 case "fetch" -> AccountCommands.fetch(parsed, out, System.in);
                 case "submitter-check" -> AccountCommands.submitterCheck(parsed, out);
@@ -232,9 +250,83 @@ public final class Main {
         for (String p : a.positionals.subList(1, a.positionals.size())) {
             jars.add(Path.of(p));
         }
-        Path record = Records.writeBuildRecord(release, jars, a.options("builder"));
-        out.println("Wrote " + record + " - sign it with the registry key.");
+        // the scan's hard findings go into the record the registry signs: the release is verified
+        // only with a signed exception from a trusted reviewer (bcz except)
+        java.util.Set<String> hard = new java.util.TreeSet<>();
+        StringBuilder report = new StringBuilder();
+        for (int i = 0; i < jars.size(); i++) {
+            Scanner.Report r = Scanner.scan(jars.get(i));
+            hard.addAll(r.hardRules());
+            report.append("jar ").append(i).append(": ").append(r.jarSha256()).append(", ").append(r.classCount())
+                    .append(" classes, ").append(r.count(Scanner.Severity.HARD)).append(" hard, ")
+                    .append(r.count(Scanner.Severity.SOFT)).append(" soft findings\n");
+            for (Scanner.Finding f : r.findings()) {
+                report.append("  ").append(f.severity()).append("  ").append(f.rule()).append("  ").append(f.where())
+                        .append(": ").append(f.detail()).append('\n');
+            }
+        }
+        // the report goes next to the record and its hash into it: reviews co-sign what they saw
+        Path record = Records.writeBuildRecord(release, jars, a.options("builder"), List.copyOf(hard), report.toString());
+        out.println("Wrote " + record + " - sign it with the registry key."
+                + (hard.isEmpty() ? "" : " Hard findings: " + String.join(", ", hard)
+                        + " (verified only with an exception from a trusted reviewer: bcz except)"));
         return OK;
+    }
+
+    /**
+     * Libraries the jar bundles (Maven's pom.properties) checked against known vulnerabilities in the
+     * public OSV database. Exit 15 when one has a known vulnerability; a hint for reviewers, not a block.
+     */
+    private static int osv(Args a, PrintStream out) throws IOException, UsageException {
+        Path jar = Path.of(a.positional(0, "jar"));
+        List<io.github.bitecheckpz.core.Dependencies.Library> libs = io.github.bitecheckpz.core.Dependencies.bundled(jar);
+        boolean md = a.option("format").orElse("text").equals("markdown");
+        if (libs.isEmpty()) {
+            out.println(md ? "No bundled libraries with Maven metadata in `" + jar.getFileName() + "`." : "no bundled libraries");
+            return OK;
+        }
+        String body;
+        try {
+            var client = java.net.http.HttpClient.newBuilder().connectTimeout(java.time.Duration.ofSeconds(10)).build();
+            var request = java.net.http.HttpRequest.newBuilder(java.net.URI.create("https://api.osv.dev/v1/querybatch"))
+                    .timeout(java.time.Duration.ofSeconds(30)).header("content-type", "application/json")
+                    .POST(java.net.http.HttpRequest.BodyPublishers.ofString(io.github.bitecheckpz.core.Dependencies.osvQuery(libs)))
+                    .build();
+            var response = client.send(request, java.net.http.HttpResponse.BodyHandlers.ofString());
+            if (response.statusCode() != 200) {
+                throw new IOException("OSV answered " + response.statusCode());
+            }
+            body = response.body();
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            throw new IOException("interrupted");
+        }
+        List<?> results;
+        try {
+            results = ((Map<?, ?>) io.github.bitecheckpz.core.Json.parse(body)).get("results") instanceof List<?> l ? l : List.of();
+        } catch (io.github.bitecheckpz.core.Json.JsonException | ClassCastException e) {
+            throw new IOException("unexpected answer from OSV: " + e.getMessage());
+        }
+        int vulnerable = 0;
+        if (md) {
+            out.println("Bundled libraries checked against OSV (known vulnerabilities):");
+            out.println();
+        }
+        for (int i = 0; i < libs.size(); i++) {
+            List<String> ids = new ArrayList<>();
+            if (i < results.size() && results.get(i) instanceof Map<?, ?> r && r.get("vulns") instanceof List<?> vulns) {
+                for (Object v : vulns) {
+                    if (v instanceof Map<?, ?> m && m.get("id") != null) {
+                        ids.add(String.valueOf(m.get("id")));
+                    }
+                }
+            }
+            var lib = libs.get(i);
+            vulnerable += ids.isEmpty() ? 0 : 1;
+            out.println((md ? "- " : "") + lib.name() + " " + lib.version() + ": "
+                    + (ids.isEmpty() ? "no known vulnerabilities" : String.join(", ", ids)));
+        }
+        return vulnerable > 0 ? 15 : OK;
     }
 
     private static int review(Args a, PrintStream out) throws IOException, Toml.TomlException, UsageException {

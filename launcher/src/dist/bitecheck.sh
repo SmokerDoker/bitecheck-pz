@@ -3,6 +3,8 @@
 # Uses the Java runtime that comes with Project Zomboid, so no separate Java install is needed.
 DIR="$(cd "$(dirname "$0")" && pwd)"
 JAR="$DIR/BiteCheck.jar"
+# BiteCheck repaired its own jar while it ran: put the signed copy in place before starting
+if [ -f "$DIR/BiteCheck.jar.repair" ]; then mv -f "$DIR/BiteCheck.jar.repair" "$JAR"; fi
 
 # BITECHECK_JAVA=/path/to/java overrides the search (e.g. on a dedicated server).
 SERVER_DIR=""

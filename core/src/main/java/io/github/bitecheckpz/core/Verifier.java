@@ -22,7 +22,8 @@ import java.util.stream.Stream;
  *   <li>enough distinct reviewers (not the author, and not the publisher unless the policy allows
  *       it) approved exactly this jar or this build record with valid signatures, as required by
  *       the registry policy (default: 2 approvals, at least 1 from a "trusted" reviewer),</li>
- *   <li>there is no open critical flag for this hash, and the entry is not pending.</li>
+ *   <li>there is no open critical flag for this hash, and the entry is not pending, suspended or
+ *       withdrawn.</li>
  * </ol>
  *
  * <p>Build records come in three kinds ({@code method}): "rebuild" - CI built the jar from source
@@ -181,19 +182,40 @@ public final class Verifier {
                 messages.add("this is an example entry and is never verified");
                 return new Result(Status.UNVERIFIED, sha, mod, version, messages, method);
             }
-            if ("pending".equals(Toml.string(modInfo, "status"))) {
+            String modStatus = Toml.string(modInfo, "status");
+            if ("pending".equals(modStatus)) {
                 messages.add("this entry is still pending and not verified yet");
                 return new Result(Status.UNVERIFIED, sha, mod, version, messages, method);
             }
+            if ("suspended".equals(modStatus) || "withdrawn".equals(modStatus)) {
+                // the registry took the approval back (suspended) or the author withdrew the mod:
+                // none of its releases is verified any more, whatever reviews they have
+                messages.add("this mod is " + modStatus + " in the registry; its releases are not verified");
+                return new Result(Status.UNVERIFIED, sha, mod, version, messages, method);
+            }
+            // Confirmed malware first: such a release is BLOCKED even though its author's key counts
+            // as revoked by now (blocking early is the safe direction).
+            List<String> flagMessages = new ArrayList<>();
+            if (checkFlags(sha, mod, version, flagMessages) == Status.BLOCKED) {
+                messages.addAll(flagMessages);
+                return new Result(Status.BLOCKED, sha, mod, version, messages, method);
+            }
             String author = Registry.signer(modInfo);
-            var authorKey = author == null || !Registry.NAME.matcher(author).matches()
-                    ? Optional.<Keys.PublicKeyInfo>empty() : registry.authorKey(author);
-            if (authorKey.isEmpty()) {
+            List<Keys.PublicKeyInfo> authorKeys = author == null || !Registry.NAME.matcher(author).matches()
+                    ? List.of() : registry.authorKeysFor(author, releaseFile);
+            if (authorKeys.isEmpty()) {
                 messages.add(registry.revocation("authors", author).map(r -> "key of publisher '" + author + "' " + r)
                         .orElse("no valid key for publisher '" + author + "'"));
                 return new Result(Status.INVALID, sha, mod, version, messages);
             }
-            Signatures.Check releaseSig = Signatures.verify(releaseFile, authorKey.get());
+            // the current key, or one it replaced (bcz rotate-key): earlier releases stay valid
+            Signatures.Check releaseSig = Signatures.Check.INVALID;
+            for (Keys.PublicKeyInfo k : authorKeys) {
+                releaseSig = Signatures.verify(releaseFile, k);
+                if (releaseSig == Signatures.Check.VALID) {
+                    break;
+                }
+            }
             if (releaseSig != Signatures.Check.VALID) {
                 messages.add("release file: publisher " + releaseSig.description());
                 return new Result(Status.INVALID, sha, mod, version, messages);
@@ -206,10 +228,23 @@ public final class Verifier {
                 return new Result(flagStatus, sha, mod, version, messages, method);
             }
 
-            // 4. Reviews.
+            // 4. Hard scanner findings (recorded by CI in the signed build record) need a signed
+            //    exception from a trusted reviewer; without one the release is never verified.
+            List<String> hard = strings(build.get("hard_findings"));
+            if (!hard.isEmpty()) {
+                String accepted = acceptedBy(mod, version, Hashing.sha256Hex(buildFile), hard, modInfo);
+                if (accepted == null) {
+                    messages.add("hard scanner findings (" + String.join(", ", hard)
+                            + ") need an exception from a trusted reviewer");
+                    return new Result(Status.UNVERIFIED, sha, mod, version, messages, method);
+                }
+                messages.add(accepted);
+            }
+
+            // 5. Reviews.
             Registry.Policy policy = registry.policy();
-            int approvals = 0;
-            int trusted = 0;
+            // independence: reviewers invited by the same person count once (their "group")
+            Map<String, Boolean> groups = new java.util.LinkedHashMap<>(); // group -> has a trusted member
             Set<String> seen = new HashSet<>();
             Path reviewsDir = registry.reviewsDir(mod, version);
             if (Files.isDirectory(reviewsDir)) {
@@ -229,14 +264,21 @@ public final class Verifier {
                     if (!seen.add(reviewer)) {
                         continue;
                     }
-                    approvals++;
                     String level = registry.reviewerLevel(reviewer);
-                    if (level.equals("trusted")) {
-                        trusted++;
+                    String invitedBy = registry.invitedBy(reviewer);
+                    String group = invitedBy == null ? "self:" + reviewer : "invited:" + invitedBy;
+                    if (groups.containsKey(group)) {
+                        messages.add("review by '" + reviewer + "' not counted: invited by '" + invitedBy
+                                + "' like another reviewer of this release (not independent)");
+                        groups.merge(group, level.equals("trusted"), Boolean::logicalOr);
+                        continue;
                     }
+                    groups.put(group, level.equals("trusted"));
                     messages.add("approved by '" + reviewer + "' (" + level + ")");
                 }
             }
+            int approvals = groups.size();
+            int trusted = (int) groups.values().stream().filter(b -> b).count();
             if (approvals >= policy.requiredApprovals() && trusted >= policy.requiredTrusted()) {
                 return new Result(Status.VERIFIED, sha, mod, version, messages, method);
             }
@@ -247,6 +289,56 @@ public final class Verifier {
             messages.add("cannot read registry file: " + e.getMessage());
             return new Result(Status.INVALID, sha, mod, version, messages);
         }
+    }
+
+    private static List<String> strings(Object value) {
+        List<String> out = new ArrayList<>();
+        if (value instanceof List<?> list) {
+            for (Object o : list) {
+                if (o instanceof String s && !s.isBlank()) {
+                    out.add(s);
+                }
+            }
+        }
+        return out;
+    }
+
+    /**
+     * The message for the first valid exception that accepts all {@code hard} rules of this build
+     * record: from a trusted reviewer (not the author or publisher), signed, for exactly this
+     * build record; null if there is none.
+     */
+    private String acceptedBy(String mod, String version, String buildSha, List<String> hard,
+            Map<String, Object> modInfo) throws IOException, Toml.TomlException {
+        Path dir = registry.exceptionsDir(mod, version);
+        if (!Files.isDirectory(dir)) {
+            return null;
+        }
+        List<Path> files;
+        try (Stream<Path> list = Files.list(dir)) {
+            files = list.filter(p -> p.getFileName().toString().endsWith(".toml")).sorted().toList();
+        }
+        for (Path file : files) {
+            String name = file.getFileName().toString();
+            String reviewer = name.substring(0, name.length() - ".toml".length());
+            if (!Registry.NAME.matcher(reviewer).matches() || !registry.reviewerLevel(reviewer).equals("trusted")
+                    || Registry.selfReviewProblem(modInfo, reviewer, registry.policy()) != null) {
+                continue;
+            }
+            Map<String, Object> ex = registry.read(file);
+            if (!reviewer.equals(Toml.string(ex, "reviewer")) || !mod.equals(Toml.string(ex, "mod"))
+                    || !version.equals(Toml.string(ex, "version")) || !buildSha.equals(Toml.string(ex, "build_sha256"))
+                    || !strings(ex.get("rules")).containsAll(hard)) {
+                continue;
+            }
+            var key = registry.reviewerKey(reviewer);
+            if (key.isEmpty() || Signatures.verify(file, key.get()) != Signatures.Check.VALID) {
+                continue;
+            }
+            return "hard findings (" + String.join(", ", hard) + ") accepted by '" + reviewer + "': "
+                    + Toml.string(ex, "reason");
+        }
+        return null;
     }
 
     /** Returns null if the review counts as an approval, otherwise the reason it does not. */
@@ -274,7 +366,8 @@ public final class Verifier {
             return "verdict is not 'approve'";
         }
         String level = registry.reviewerLevel(reviewer);
-        if (!level.equals("reviewer") && !level.equals("trusted")) {
+        boolean newcomer = level.equals("new") && policy.newcomersCount();
+        if (!level.equals("reviewer") && !level.equals("trusted") && !newcomer) {
             return "reviewer level is '" + level + "'";
         }
         var key = registry.reviewerKey(reviewer);
@@ -287,6 +380,12 @@ public final class Verifier {
             return sig.description();
         }
         if ("diff".equals(Toml.string(review, "scope"))) {
+            // an update that changed much of the code needs a full review (reviews from before the
+            // field have none and are judged by their base only)
+            if (review.get("changed_percent") instanceof Long changed && changed > Records.MAX_DIFF_PERCENT) {
+                return "diff review, but " + changed + " % of the code changed (more than "
+                        + Records.MAX_DIFF_PERCENT + " % needs a full review)";
+            }
             return diffBaseProblem(review, mod, version);
         }
         return null;
@@ -358,6 +457,12 @@ public final class Verifier {
             if ("confirmed".equals(status)) {
                 messages.add("confirmed malicious: " + description);
                 return Status.BLOCKED;
+            }
+            String reporter = Toml.string(flag, "reported_by");
+            if ("open".equals(status) && reporter != null && registry.flagAbuse(reporter) >= Registry.ABUSE_LIMIT) {
+                messages.add("open " + severity + " flag by '" + reporter + "' not counted: "
+                        + "earlier flags of theirs were found to be abuse");
+                continue;
             }
             if ("open".equals(status)) {
                 messages.add("open " + severity + " flag: " + description);

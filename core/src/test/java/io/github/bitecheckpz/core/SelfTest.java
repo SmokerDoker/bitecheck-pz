@@ -90,6 +90,208 @@ public final class SelfTest {
                     "[blocked]\n" + Hashing.sha256Hex(f.jar) + " = \"steals tokens\"\n");
             expect(f.verify().status(), Verifier.Status.BLOCKED);
         });
+        run("verifier: a suspended or withdrawn mod's releases are not VERIFIED", () -> {
+            for (String status : List.of("suspended", "withdrawn")) {
+                Fixture f = Fixture.create();
+                expect(f.verify().status(), Verifier.Status.VERIFIED);
+                Path modToml = f.modDir.resolve("mod.toml");
+                Files.writeString(modToml, Files.readString(modToml).replace("status = \"active\"", "status = \"" + status + "\""));
+                Verifier.Result r = f.verify();
+                expect(r.status(), Verifier.Status.UNVERIFIED);
+                expect(r.messages().stream().anyMatch(m -> m.contains(status)), true);
+            }
+        });
+        run("verifier: hard findings need a signed exception from a trusted reviewer", () -> {
+            Fixture f = Fixture.create();
+            // CI recorded a hard finding in the build record it signs
+            Files.writeString(f.buildFile, Files.readString(f.buildFile) + "hard_findings = [\"process\", \"unsafe\"]\n");
+            Files.deleteIfExists(Signatures.signaturePath(f.buildFile));
+            Signatures.sign(f.buildFile, f.registry);
+            // the reviews covered the old build record: write them again for this one
+            for (var reviewer : List.of(Map.entry("bob", f.bob), Map.entry("carol", f.carol))) {
+                Files.delete(f.reviewFile(reviewer.getKey()));
+                Files.deleteIfExists(Signatures.signaturePath(f.reviewFile(reviewer.getKey())));
+                Path review = Records.writeReview(f.releaseFile, null, reviewer.getKey(), "approve", "full", "ok");
+                Signatures.sign(review, reviewer.getValue());
+            }
+            Verifier.Result r = f.verify();
+            expect(r.status(), Verifier.Status.UNVERIFIED);
+            expect(r.messages().stream().anyMatch(m -> m.contains("need an exception from a trusted reviewer")), true);
+            // carol is no trusted reviewer: her exception does not count
+            Path carols = Records.writeException(f.releaseFile, "carol", List.of("unsafe", "process"), "agent");
+            Signatures.sign(carols, f.carol);
+            expect(f.verify().status(), Verifier.Status.UNVERIFIED);
+            // bob accepts only one of the two rules: not enough
+            Path bobs = Records.writeException(f.releaseFile, "bob", List.of("unsafe"), "a mod manager needs it");
+            Signatures.sign(bobs, f.bob);
+            expect(f.verify().status(), Verifier.Status.UNVERIFIED);
+            Files.delete(bobs);
+            Files.delete(Signatures.signaturePath(bobs));
+            bobs = Records.writeException(f.releaseFile, "bob", List.of("process", "unsafe"), "a mod manager needs it");
+            Signatures.sign(bobs, f.bob);
+            r = f.verify();
+            expect(r.status(), Verifier.Status.VERIFIED);
+            expect(r.messages().stream().anyMatch(m -> m.contains("accepted by 'bob': a mod manager needs it")), true);
+            // the index keeps it visible
+            String index = Index.generate(f.registry(), new Verifier(f.registry(), f.registryKey), java.time.Instant.now(), "c");
+            expect(index.contains("hard findings (process, unsafe) accepted by 'bob'"), true);
+            // a changed exception (rules widened afterwards) breaks its signature
+            Files.writeString(bobs, Files.readString(bobs).replace("reason = ", "rules2 = [\"x\"]\nreason = "));
+            expect(f.verify().status(), Verifier.Status.UNVERIFIED);
+        });
+        run("keys: an author changes keys with the old one; earlier releases stay verified", () -> {
+            Fixture f = Fixture.create();
+            Path authors = f.dir.resolve("keys/authors");
+            Path pub = authors.resolve("alice.pub");
+            String oldId = Keys.readPublic(pub).id();
+            Files.createDirectories(authors.resolve("alice.previous"));
+            Files.move(pub, authors.resolve("alice.previous/" + oldId + ".pub"));
+            java.security.KeyPair pair = Keys.generate();
+            Files.writeString(pub, Keys.encodePublic(pair.getPublic(), "alice"));
+            Signatures.sign(pub, f.author); // the old key vouches for the new one
+            // without the list of what the old key signed, it counts for nothing any more
+            expect(f.verify().status(), Verifier.Status.INVALID);
+            Path list = authors.resolve("alice.previous/" + oldId + ".releases");
+            Files.writeString(list, Hashing.sha256Hex(f.releaseFile) + "\n");
+            Signatures.sign(list, f.author);
+            expect(Lint.check(f.registry(), java.util.Optional.of(f.registryKey)), List.of());
+            expect(f.verify().status(), Verifier.Status.VERIFIED); // 1.0.0 was signed with the old key
+            expect(f.registry().authorKeys("alice").size(), 2);
+            // a new release signed with the stolen old key does not count
+            Path release2 = f.modDir.resolve("releases/2.0.0.toml");
+            Files.writeString(release2, Files.readString(f.releaseFile).replace("1.0.0", "2.0.0"));
+            Signatures.sign(release2, f.author);
+            expect(f.registry().authorKeysFor("alice", release2).size(), 1);
+            expect(Lint.check(f.registry(), java.util.Optional.of(f.registryKey)).stream()
+                    .anyMatch(e -> e.contains("releases/2.0.0.toml: publisher signature")), true);
+            Files.delete(release2);
+            Files.delete(Signatures.signaturePath(release2));
+            // a revoked old key cannot vouch for a new one
+            Files.writeString(f.dir.resolve("keys/revoked.toml"), "[revoked." + oldId + "]\nreason = \"stolen\"\n");
+            expect(Lint.check(f.registry(), java.util.Optional.of(f.registryKey)).stream()
+                    .anyMatch(e -> e.contains("must be signed by a previous key")), true);
+            Files.delete(f.dir.resolve("keys/revoked.toml"));
+            // a key change someone else signed is a lint error
+            Files.delete(Signatures.signaturePath(pub));
+            Signatures.sign(pub, f.bob);
+            expect(Lint.check(f.registry(), java.util.Optional.of(f.registryKey)).stream()
+                    .anyMatch(e -> e.contains("must be signed by a previous key")), true);
+        });
+        run("index: reviewers, open info flags and review notes on closed-source jars", () -> {
+            Fixture f = Fixture.create();
+            Files.createDirectories(f.modDir.resolve("flags"));
+            Files.writeString(f.modDir.resolve("flags/f1.toml"), "mod = \"better-guns\"\nversion = \"1.0.0\"\n"
+                    + "severity = \"info\"\nstatus = \"open\"\ndescription = \"writes a big log file\"\nreporter = \"carol\"\n"
+                    + "reported_at = \"2026-11-01T10:00:00Z\"\n");
+            String closed = "cd".repeat(32);
+            Path note = ReviewNotes.write(f.registry(), closed, "Closed 1.0 (Closed.jar)", "carol", "no network, no native code");
+            Signatures.sign(note, f.carol);
+            Path bad = ReviewNotes.write(f.registry(), "ef".repeat(32), "", "carol", "signed by someone else");
+            Signatures.sign(bad, f.bob);
+            String text = Index.generate(f.registry(), new Verifier(f.registry(), f.registryKey), java.time.Instant.now(), "c");
+            Path file = f.dir.resolve("index.toml");
+            Files.writeString(file, text);
+            Index index = Index.parse(file);
+            String sha = Hashing.sha256Hex(f.jar);
+            expect(index.reviewers(sha), List.of("bob", "carol"));
+            expect(index.note(sha), "open info flag: writes a big log file");
+            expect(index.note(closed), "review note by 'carol': no network, no native code");
+            expect(index.note("ef".repeat(32)) == null, true); // a note signed by someone else does not count
+            expect(Lint.check(f.registry(), java.util.Optional.of(f.registryKey)).stream()
+                    .anyMatch(e -> e.contains("registry/notes/" + "ef".repeat(32))), true);
+        });
+        run("reviews: independence, newcomers, team, demotion after malware", () -> {
+            Fixture f = Fixture.create(); // bob (trusted) and carol (reviewer) approved; policy default: 2 incl. 1 trusted
+            expect(f.verify().status(), Verifier.Status.VERIFIED);
+            Path trust = f.dir.resolve("keys/trust.toml");
+            String levels = Files.readString(trust);
+            // invited by the same person: one voice
+            Files.writeString(trust, levels.replace("level = \"trusted\"\n", "level = \"trusted\"\ninvited_by = \"dave\"\n")
+                    .replace("level = \"reviewer\"\n", "level = \"reviewer\"\ninvited_by = \"dave\"\n"));
+            Verifier.Result r = f.verify();
+            expect(r.status(), Verifier.Status.UNVERIFIED);
+            expect(r.messages().stream().anyMatch(m -> m.contains("not independent")), true);
+            Files.writeString(trust, levels);
+            // a newcomer counts only when the policy says so
+            Files.writeString(trust, levels.replace("level = \"reviewer\"", "level = \"new\""));
+            expect(f.verify().status(), Verifier.Status.UNVERIFIED);
+            Files.writeString(f.dir.resolve("registry/policy.toml"), "newcomers_count = true\n");
+            expect(f.verify().status(), Verifier.Status.VERIFIED);
+            Files.writeString(trust, levels);
+            // a member of the mod's team does not count
+            Path modToml = f.modDir.resolve("mod.toml");
+            String mod = Files.readString(modToml);
+            Files.writeString(modToml, mod + "team = [\"carol\"]\n");
+            expect(f.verify().status(), Verifier.Status.UNVERIFIED);
+            Files.writeString(modToml, mod);
+            expect(f.verify().status(), Verifier.Status.VERIFIED);
+            // carol approved another mod's release that is confirmed malware: she is demoted everywhere
+            Path other = f.dir.resolve("registry/mods/evil/reviews/1.0.0");
+            Files.createDirectories(other);
+            Files.writeString(other.resolve("carol.toml"), "mod = \"evil\"\nversion = \"1.0.0\"\nverdict = \"approve\"\n");
+            Files.createDirectories(f.dir.resolve("registry/mods/evil/flags"));
+            Files.writeString(f.dir.resolve("registry/mods/evil/flags/f.toml"), "mod = \"evil\"\nversion = \"1.0.0\"\n"
+                    + "severity = \"critical\"\nstatus = \"confirmed\"\ndescription = \"steals tokens\"\n");
+            Files.writeString(f.dir.resolve("registry/mods/evil/mod.toml"), "id = \"evil\"\nname = \"Evil\"\nauthor = \"alice\"\n");
+            expect(f.registry().reviewerLevel("carol"), "demoted");
+            expect(f.verify().status(), Verifier.Status.INVALID); // alice signed evil herself: her key counts as revoked
+            expect(f.registry().revocation("authors", "alice").orElse("").contains("confirmed malware"), true);
+        });
+        run("flags: a reporter whose flags were abuse no longer warns anyone", () -> {
+            Fixture f = Fixture.create();
+            Files.createDirectories(f.modDir.resolve("flags"));
+            String flag = "mod = \"better-guns\"\nversion = \"1.0.0\"\nseverity = \"critical\"\ndescription = \"x\"\nreported_by = \"mallory\"\n";
+            Files.writeString(f.modDir.resolve("flags/a.toml"), flag + "status = \"open\"\n");
+            expect(f.verify().status(), Verifier.Status.FLAGGED);
+            Files.writeString(f.modDir.resolve("flags/b.toml"), flag + "status = \"abuse\"\n");
+            Files.writeString(f.modDir.resolve("flags/c.toml"), flag + "status = \"abuse\"\n");
+            Verifier.Result r = f.verify();
+            expect(r.status(), Verifier.Status.VERIFIED);
+            expect(r.messages().stream().anyMatch(m -> m.contains("were found to be abuse")), true);
+        });
+        run("compat: version ranges and what does not match", () -> {
+            expect(Compat.isValid(">=42.13, <43"), true);
+            expect(Compat.isValid("42.13"), true);
+            expect(Compat.isValid("~42"), false);
+            expect(Compat.satisfies("42.22.2", ">=42.13, <43"), true);
+            expect(Compat.satisfies("42.12.9", ">=42.13"), false);
+            expect(Compat.satisfies("43.0", ">=42.13, <43"), false);
+            expect(Compat.satisfies("42.13", "42.13.0"), true);
+            expect(Compat.satisfies("3.0.0-beta3", ">=2.3"), true);
+            expect(Compat.satisfies("2.2.9", ">=2.3"), false);
+            expect(Compat.mismatches("game >=42.13; zombiebuddy >=2.3", "42.12.1", "3.0.0-beta3"),
+                    List.of("Project Zomboid >=42.13 (installed 42.12.1)"));
+            expect(Compat.mismatches("game >=42.13", null, null), List.of()); // unknown: nothing to say
+        });
+        run("compat: a release's [compat] goes into the index for its verified jars", () -> {
+            Fixture f = Fixture.create();
+            // the author signs the release with [compat]; the build record names the release's hash
+            Files.writeString(f.releaseFile, Files.readString(f.releaseFile) + "\n[compat]\ngame = \">=42.13, <43\"\nzombiebuddy = \">=2.3\"\n");
+            Files.deleteIfExists(Signatures.signaturePath(f.releaseFile));
+            Signatures.sign(f.releaseFile, f.author);
+            Files.writeString(f.buildFile, Files.readString(f.buildFile).replaceAll("(?m)^release_sha256 = .*$",
+                    "release_sha256 = \"" + Hashing.sha256Hex(f.releaseFile) + "\""));
+            Files.deleteIfExists(Signatures.signaturePath(f.buildFile));
+            Signatures.sign(f.buildFile, f.registry);
+            for (var reviewer : List.of(Map.entry("bob", f.bob), Map.entry("carol", f.carol))) {
+                Files.delete(f.reviewFile(reviewer.getKey()));
+                Files.deleteIfExists(Signatures.signaturePath(f.reviewFile(reviewer.getKey())));
+                Path review = Records.writeReview(f.releaseFile, null, reviewer.getKey(), "approve", "full", "ok");
+                Signatures.sign(review, reviewer.getValue());
+            }
+            expect(f.verify().status(), Verifier.Status.VERIFIED);
+            expect(Lint.check(f.registry(), java.util.Optional.of(f.registryKey)), List.of());
+            String text = Index.generate(f.registry(), new Verifier(f.registry(), f.registryKey), java.time.Instant.now(), "c");
+            expect(text.contains("[compat]"), true);
+            Path file = f.dir.resolve("index.toml");
+            Files.writeString(file, text);
+            Index index = Index.parse(file);
+            expect(index.lookup(Hashing.sha256Hex(f.jar)).compat(), "game >=42.13,<43; zombiebuddy >=2.3");
+            // a broken range is a lint error
+            Files.writeString(f.releaseFile, Files.readString(f.releaseFile).replace(">=2.3", "~2"));
+            expect(Lint.check(f.registry(), java.util.Optional.of(f.registryKey)).stream()
+                    .anyMatch(e -> e.contains("[compat] zombiebuddy")), true);
+        });
         run("verifier: example entries are never VERIFIED", () -> {
             Fixture f = Fixture.create();
             Files.writeString(f.modDir.resolve("mod.toml"), "\nexample = true\n",
@@ -110,6 +312,47 @@ public final class SelfTest {
             expect(r.findings().stream().anyMatch(f -> f.rule().equals("process")), true);
             expect(r.findings().stream().anyMatch(f -> f.rule().equals("network")), true);
             expect(r.findings().stream().anyMatch(f -> f.rule().equals("strings")), true);
+        });
+        run("rebuilds: a volunteer's identical rebuild shows in the index", () -> {
+            Fixture f = Fixture.create();
+            Path dir = Files.createDirectories(f.modDir.resolve("rebuilds/1.0.0"));
+            Path record = dir.resolve("carol.toml");
+            Files.writeString(record, "mod = \"better-guns\"\nversion = \"1.0.0\"\nbuild_sha256 = \""
+                    + Hashing.sha256Hex(f.buildFile) + "\"\njar_sha256 = \"" + Hashing.sha256Hex(f.jar)
+                    + "\"\nrebuilder = \"carol\"\n");
+            Signatures.sign(record, f.carol);
+            expect(Rebuilds.of(f.registry(), "better-guns", "1.0.0"), List.of("carol"));
+            expect(Lint.check(f.registry(), java.util.Optional.of(f.registryKey)), List.of());
+            String index = Index.generate(f.registry(), new Verifier(f.registry(), f.registryKey), java.time.Instant.now(), "c");
+            expect(index.contains("rebuilt independently by carol"), true);
+            // a record for another jar does not count, and lint says why
+            Files.writeString(record, Files.readString(record).replace(Hashing.sha256Hex(f.jar), "ab".repeat(32)));
+            expect(Rebuilds.of(f.registry(), "better-guns", "1.0.0"), List.of());
+            expect(Lint.check(f.registry(), java.util.Optional.of(f.registryKey)).stream()
+                    .anyMatch(e -> e.contains("not one of the build record's jars")), true);
+        });
+        run("dependencies: bundled libraries from Maven metadata, and the OSV query", () -> {
+            Path jar = Files.createTempFile("bcz-deps", ".jar");
+            try (var zip = new java.util.zip.ZipOutputStream(Files.newOutputStream(jar))) {
+                zip.putNextEntry(new java.util.zip.ZipEntry("META-INF/maven/com.google.code.gson/gson/pom.properties"));
+                zip.write("groupId=com.google.code.gson\nartifactId=gson\nversion=2.8.5\n".getBytes(java.nio.charset.StandardCharsets.UTF_8));
+                zip.closeEntry();
+                zip.putNextEntry(new java.util.zip.ZipEntry("a/B.class"));
+                zip.write(1);
+                zip.closeEntry();
+            }
+            List<Dependencies.Library> libs = Dependencies.bundled(jar);
+            expect(libs, List.of(new Dependencies.Library("com.google.code.gson", "gson", "2.8.5")));
+            Object query = Json.parse(Dependencies.osvQuery(libs));
+            expect(String.valueOf(query).contains("com.google.code.gson:gson"), true);
+            expect(String.valueOf(query).contains("2.8.5"), true);
+        });
+        run("scanner: an own class loader and opening other programs are hard", () -> {
+            Scanner.Report loader = Scanner.scan(jarOf("OwnLoaderMod"));
+            expect(loader.findings().stream().anyMatch(f -> f.severity() == Scanner.Severity.HARD
+                    && f.rule().equals("code-loading") && f.detail().contains("extends java.lang.ClassLoader")), true);
+            expect(Scanner.scan(jarOf("DesktopMod")).hardRules().contains("system"), true);
+            expect(Scanner.scan(jarOf("CleanMod")).hardRules(), List.of());
         });
         run("scanner: Java that Lua can call, and what Lua reaches through it", () -> {
             Scanner.Report risky = Scanner.scan(jarOf("LuaFileMod"));
@@ -280,6 +523,19 @@ public final class SelfTest {
             Verifier verifier = new Verifier(f.registry(), f.registryKey);
             expect(verifier.verify(jar2).status(), Verifier.Status.VERIFIED);
             expect(Lint.check(f.registry(), java.util.Optional.of(f.registryKey)), List.of());
+            // a diff review of an update that changed 45 % of the code does not count
+            Files.delete(diff);
+            Files.delete(Signatures.signaturePath(diff));
+            Path big = Records.writeReview(release2, jar2, "bob", "approve", "diff", "only the changes", 45);
+            Signatures.sign(big, f.bob);
+            Verifier.Result tooBig = new Verifier(f.registry(), f.registryKey).verify(jar2);
+            expect(tooBig.status(), Verifier.Status.UNVERIFIED);
+            expect(tooBig.messages().stream().anyMatch(m -> m.contains("45 % of the code changed")), true);
+            Files.delete(big);
+            Files.delete(Signatures.signaturePath(big));
+            Signatures.sign(Records.writeReview(release2, jar2, "bob", "approve", "diff", "only the changes", 12), f.bob);
+            verifier = new Verifier(f.registry(), f.registryKey);
+            expect(verifier.verify(jar2).status(), Verifier.Status.VERIFIED);
             f.addFlag("open", "critical"); // 1.0.0 is no longer verified
             Verifier.Result r = verifier.verify(jar2);
             expect(r.status(), Verifier.Status.UNVERIFIED);

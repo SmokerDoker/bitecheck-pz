@@ -2,7 +2,8 @@
 #   1. builds every release that has no build record yet, twice, without secrets,
 #      (and, for "workshop" releases, fetches the Steam Workshop jars in a job without secrets),
 #   2. signs a build record with the registry key if both builds match (workshop: the Workshop
-#      jars have exactly the files both builds produced) and the scan is clean,
+#      jars have exactly the files both builds produced); the record lists the scan's hard
+#      findings, and such a release needs a trusted reviewer's exception (bcz except),
 #   3. publishes the signed launcher index to the "index" branch.
 # The registry key is a secret (BITECHECK_REGISTRY_KEY) in the "registry-signing" environment.
 # Between runs, timestamp.yml confirms daily (without an approval) that the index is still current.
@@ -185,10 +186,36 @@ jobs:
           $bcz verify-sig "$build" --pub keys/registry.pub
           git config user.name "BiteCheck Registry"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add "$build" "$build.sig"
+          git add "$build" "$build.sig" "${RELEASE%.toml}.scan.txt"
           git commit -q -m "Build record for ${RELEASE#registry/mods/}"
           git pull -q --rebase origin main
           git push -q origin HEAD:main
+      - name: Mirror the jars as a GitHub release
+        # kept for good (Actions artifacts expire after 30 days); bcz fetch downloads from here and
+        # checks every hash against the signed build record. Only for licenses that allow it.
+        env:
+          RELEASE: ${{ matrix.release }}
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          build="${RELEASE%.toml}.build.toml"
+          [ -f "$build" ] || { echo "no build record, nothing to mirror"; exit 0; }
+          rest="${RELEASE#registry/mods/}"; mod="${rest%%/*}"; version="$(basename "$RELEASE" .toml)"
+          license="$(sed -n 's/^license *= *"\(.*\)"/\1/p' "registry/mods/$mod/mod.toml" | head -n 1)"
+          if ! grep -Eiq '^(MIT|Apache|GPL|LGPL|AGPL|MPL|BSD|ISC|Unlicense|CC0|Zlib|EUPL)' <<<"$license"; then
+            echo "::notice::$mod is licensed '$license': its jars are not mirrored"
+            exit 0
+          fi
+          tag="mod-$mod-$version"
+          if gh release view "$tag" >/dev/null 2>&1; then
+            echo "$tag is mirrored already"
+            exit 0
+          fi
+          mkdir -p mirror
+          n=$(find final -name '*.jar' | wc -l)
+          for ((i = 0; i < n; i++)); do cp "final/$i.jar" "mirror/$mod-$version-$i.jar"; done
+          gh release create "$tag" mirror/*.jar --target main --latest=false \
+            --title "$mod $version (verified jars)" \
+            --notes "Jars of $mod $version as CI built them; their SHA-256 hashes are in the signed build record \`$build\`. Use \`bcz fetch\`, which checks them."
 
   index:
     needs: [pending, sign]

@@ -8,10 +8,16 @@ registry/
   mods/<mod>/releases/<version>.toml        + .sig   release: commit and build recipe   (signed by the author)
   mods/<mod>/releases/<version>.build.toml  + .sig   build record: jar SHA-256          (signed by the registry)
   mods/<mod>/reviews/<version>/<reviewer>.toml + .sig   one review per reviewer          (signed by the reviewer)
+  mods/<mod>/exceptions/<version>/<reviewer>.toml + .sig  hard findings accepted      (signed by a trusted reviewer)
   mods/<mod>/flags/<flag>.toml                       flags raised against a release
+  notes/<sha256>.toml                       + .sig   review note on a closed-source jar (signed by a reviewer)
+  mods/<mod>/rebuilds/<version>/<name>.toml + .sig   a volunteer's identical rebuild (bcz rebuild)
+  mods/<mod>/releases/<version>.scan.txt             CI's scan report; its hash is scan_sha256 in the build record
   blocklist.toml                                     jar hashes that must never load
 keys/
   registry.pub, authors/<name>.pub, reviewers/<name>.pub
+  authors/<name>.pub.sig, authors/<name>.previous/   key change: the new key signed by the old one; the old key
+                                                     stays valid only for the releases listed in <id>.releases
   trust.toml                                         reviewer levels
   accounts.toml                                      GitHub account of each name
   revoked.toml                                       revoked keys, by key id
@@ -26,6 +32,17 @@ keys/
 3. Enough different reviewers approved exactly this jar hash (or the build record listing it) with valid signatures, as set in `policy.toml`: `required_approvals` (default 2), of which `required_trusted` have level `trusted` (default 1). The author never counts; the publisher of an upstream mod counts only while `publisher_may_review = true` (start-up policy: one trusted approval, publisher may review). A review with `scope = "diff"` checked only the changes since the previous release; it counts only if it names the release directly before this one and that release is itself `VERIFIED`.
 4. There is no open critical flag for this hash or its version.
 5. None of the keys involved is listed in `keys/revoked.toml`.
+6. If the build record lists hard scanner findings (`hard_findings`), a **trusted** reviewer (not the author, and not the publisher unless the policy allows it) accepted all of them in a signed exception for exactly this build record (`bcz except`).
+7. The mod is not `pending`, `suspended` or `withdrawn` in `mod.toml`.
+
+Who counts as a reviewer:
+
+- **Independent reviewers.** Reviewers invited by the same person (`invited_by` in `keys/trust.toml`) count once together; members of the mod's team (`team = ["name", ...]` in `mod.toml`) do not count.
+- **Newcomers.** Level `new` counts only with `newcomers_count = true` in `policy.toml` (the planned "a newcomer plus a higher level"; `required_trusted` still applies).
+- **Demotion.** A reviewer who approved a release that later got a `confirmed` flag counts as `demoted`: none of their approvals counts until a maintainer has looked at them again. The author of such a release (when they signed it themselves) has their key treated as revoked.
+- **Promotion.** `bcz reviewers` shows who meets the criteria of the next level (5 reviews a trusted reviewer confirmed; 25 and six months for trusted); a maintainer sets the level with `bcz trust`.
+- **Flag abuse.** A maintainer can set a flag's status to `abuse`; from two such flags on, the reporter's open flags no longer warn or block anything.
+- **Diff reviews** record how much of the code changed (`changed_percent`); above 30 % they do not count: the update needs a full review.
 
 Other results: `UNVERIFIED` (not in the registry or not enough approvals — the launcher asks the user), `FLAGGED` (open critical flag — strong warning), `BLOCKED` (on the block list or a confirmed flag — never loaded), `INVALID` (files do not match their signatures — treated as tampering).
 
@@ -86,6 +103,34 @@ notes = "…"
 ```
 
 A review names either one jar (`jar_sha256`) or the whole build record (`build_sha256`, what `bcz approve` writes).
+
+**Compatibility** (optional, in the release file, signed with it): which versions the release was made for. The index passes it on and the launcher warns (never blocks) when the installed versions do not match.
+
+```toml
+[compat]
+game = ">=42.13, <43"     # Project Zomboid
+zombiebuddy = ">=2.3"
+```
+
+**Review note** (`registry/notes/<sha256>.toml`, written by `bcz note`): findings on a jar whose source is not public, so it can never be verified. Findings only, never code or the file. Players see it in the launcher's warning about that jar.
+
+```toml
+sha256 = "…"
+name = "Some Mod 1.2 (SomeMod.jar)"
+reviewer = "bob"
+findings = "Reads and writes only Zomboid/Lua; no network, no native code."
+```
+
+**Exception** (`exceptions/<version>/<reviewer>.toml`, written by `bcz except`, only by a trusted reviewer):
+
+```toml
+mod = "example-mod"
+version = "1.0.0"
+build_sha256 = "…"        # the build record whose hard_findings it accepts
+reviewer = "bob"
+rules = ["unsafe"]        # must cover every rule in the build record's hard_findings
+reason = "a mod manager: needs the instrumentation API to switch mods while the game runs"
+```
 
 **Flag** (`flags/<id>.toml`, written by `bcz flag`):
 

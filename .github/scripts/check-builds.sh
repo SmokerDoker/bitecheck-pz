@@ -5,8 +5,9 @@
 #   workshop: the Workshop item's jars (workshop/<path>, from fetch-workshop.sh) must have exactly
 #             the files that both builds produced (bcz jar-compare); final = the Workshop jars
 # Both builders must have used the same game files (game.txt). Scans the final jars into the step
-# summary. Exit 1 if the builds do not match. Hard findings (bcz scan exit 14) do not fail the
-# check: they are listed in the summary and every review must explain them.
+# summary. Exit 1 if the builds do not match. Hard findings (bcz scan exit 14) are recorded in the
+# build record; such a release is verified only with a signed exception from a trusted reviewer
+# (bcz except). With HARD_FINDINGS=fail (pull requests) they fail the check, so reviewers see them.
 # Usage: check-builds.sh <bcz> <release.toml> <registry dir>
 set -euo pipefail
 bcz="$1" release="$2" registry="$3"
@@ -43,6 +44,13 @@ if [ "$type" = workshop ]; then
 else
   if ! diff -q a/sha256.txt b/sha256.txt > /dev/null; then
     { echo "❌ The two builds differ. See CONTRIBUTING.md for reproducible builds."; echo '```'; diff a/sha256.txt b/sha256.txt || true; echo '```'; } >> "$summary"
+    # what differs inside the jars: the files and classes, so the author sees what is not reproducible
+    for jar in a/*.jar; do
+      other="b/$(basename "$jar")"
+      if [ -f "$other" ] && ! cmp -s "$jar" "$other"; then
+        { echo "Differences in \`$(basename "$jar")\`:"; echo '```'; "$bcz" jar-compare "$jar" "$other" 2>&1 | head -n 60 || true; echo '```'; } >> "$summary"
+      fi
+    done
     echo "::error::the two builds differ"
     exit 1
   fi
@@ -56,7 +64,20 @@ else
 fi
 
 status=0
+hard=0
 for jar in final/*.jar; do
-  "$bcz" scan "$jar" --format markdown >> "$summary" || { code=$?; [ "$code" -eq 14 ] || status=$code; }
+  "$bcz" scan "$jar" --format markdown >> "$summary" || { code=$?; if [ "$code" -eq 14 ]; then hard=1; else status=$code; fi; }
+  # bundled libraries against known vulnerabilities: a hint for the reviewers, never a block
+  "$bcz" osv "$jar" --format markdown >> "$summary" 2>&1 || echo "::warning::$(basename "$jar"): a bundled library has known vulnerabilities (see the summary)"
 done
+if [ "$hard" -eq 1 ]; then
+  msg="hard scanner findings: this release can only be verified with an exception from a trusted reviewer (bcz except), after the build record exists"
+  echo "**⛔ ${msg}.**" >> "$summary"
+  if [ "${HARD_FINDINGS:-record}" = fail ] && [ "$status" -eq 0 ]; then
+    echo "::error::${msg}"
+    status=14
+  else
+    echo "::warning::${msg}"
+  fi
+fi
 exit $status

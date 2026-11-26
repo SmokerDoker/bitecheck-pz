@@ -51,15 +51,17 @@ you can do on your computer, including changing BiteCheck itself.
   again. A program written to attack BiteCheck in particular can get around this; a generic one
   cannot.
 - **Self-check.** BiteCheck compares its own program file with the signed checksums of its
-  release and repairs itself through the signed update when they differ.
+  release and repairs itself through the signed update when they differ (on Linux through the
+  system's password prompt, pkexec). The portable zip compares every file of its folder (program
+  file, start scripts) with the signed release zip and puts changed files back.
 - **Multiplayer (planned).** Servers will compare the hashes of their players' Java mods, so a
   client whose BiteCheck or mods were changed stands out to the admin.
 
 ## Reporting a malicious mod
 
-If a mod — verified or not — contains malicious code, please **open a flag** on its release in this repository (an issue titled `FLAG: <mod> <version>` until the flag tooling exists). Include the file hash and the code location if you can.
+If a mod — verified or not — contains malicious code, please **flag** its release: with `bcz flag <mod> --severity critical --notes "…"` if you have a BiteCheck key, otherwise with an issue in this repository titled `FLAG: <mod> <version>`. Include the file hash and the code location if you can.
 
-Critical flags remove a release's approval immediately until two trusted reviewers or a maintainer have decided.
+A critical flag removes the release's approval with the next index, which the registry publishes when the flag is merged, until two trusted reviewers or a maintainer have decided.
 
 ## Reporting a vulnerability in BiteCheck itself
 

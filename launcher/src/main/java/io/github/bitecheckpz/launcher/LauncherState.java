@@ -87,19 +87,35 @@ public final class LauncherState {
                 // ignore a broken value; the next accepted index fixes it
             }
         }
-        // Answers changed outside BiteCheck are not used: the player is asked again. A file from
-        // before check values (no key yet) is accepted once and gets one when it is saved.
+        // Answers and the rollback guard changed outside BiteCheck are not used: the player is asked
+        // again. A file from before check values (no check line, no key yet) is accepted once and
+        // gets one when it is saved; a file with a check value whose key is gone is not.
         Path keyFile = file.resolveSibling(KEY_FILE);
+        String check = Toml.string(doc, "check");
         if (Files.isRegularFile(keyFile)) {
-            String expected = state.checkValue(Files.readAllBytes(keyFile));
-            if (!expected.equals(Toml.string(doc, "check"))) {
-                state.tampered = !state.allowedAnyway.isEmpty() || !state.refused.isEmpty() || !state.trusted.isEmpty();
-                state.allowedAnyway.clear();
-                state.refused.clear();
-                state.trusted.clear();
+            byte[] key = Files.readAllBytes(keyFile);
+            boolean v2 = String.valueOf(CHECK_VERSION).equals(Toml.string(doc, "check_version"));
+            // version 1 (before 0.1.11) did not cover newest_index; it is accepted until the next save
+            boolean ok = v2 ? state.checkValue(key, 2).equals(check) : state.checkValue(key, 1).equals(check);
+            if (!ok) {
+                state.reject();
             }
+        } else if (check != null) {
+            state.reject(); // the key was deleted: nothing in the file can be checked any more
         }
         return state;
+    }
+
+    /** The check value's format: 2 covers the answers, the trusted versions and newest_index. */
+    static final int CHECK_VERSION = 2;
+
+    /** The file was changed outside BiteCheck: its answers and its rollback guard are not used. */
+    private void reject() {
+        tampered = !allowedAnyway.isEmpty() || !refused.isEmpty() || !trusted.isEmpty() || newestIndex != null;
+        allowedAnyway.clear();
+        refused.clear();
+        trusted.clear();
+        newestIndex = null; // the index's own 7-day limit still keeps an old index out
     }
 
     /** True if the saved answers were changed outside BiteCheck; they were not loaded. */
@@ -107,13 +123,19 @@ public final class LauncherState {
         return tampered;
     }
 
-    /** HMAC-SHA256 over the player's answers and trusted versions, in a fixed order. */
-    private String checkValue(byte[] key) throws IOException {
-        StringBuilder text = new StringBuilder("bitecheck-state-1\n");
+    /**
+     * HMAC-SHA256 over the player's answers and trusted versions, in a fixed order; version 2 also
+     * over the newest accepted index (the rollback guard).
+     */
+    private String checkValue(byte[] key, int version) throws IOException {
+        StringBuilder text = new StringBuilder("bitecheck-state-" + version + "\n");
         allowedAnyway.forEach((k, v) -> text.append("allowed\t").append(k).append('\t').append(v).append('\n'));
         refused.forEach((k, v) -> text.append("refused\t").append(k).append('\t').append(v).append('\n'));
         trusted.values().forEach(t -> text.append("trusted\t").append(t.jar()).append('\t').append(t.sha256())
                 .append('\t').append(t.version()).append('\t').append(t.steamUpdated()).append('\n'));
+        if (version >= 2) {
+            text.append("newest\t").append(newestIndex == null ? "-" : newestIndex.toString()).append('\n');
+        }
         try {
             javax.crypto.Mac mac = javax.crypto.Mac.getInstance("HmacSHA256");
             mac.init(new javax.crypto.spec.SecretKeySpec(key, "HmacSHA256"));
@@ -176,8 +198,9 @@ public final class LauncherState {
         if (newestIndex != null) {
             out.append("newest_index = ").append(Toml.quote(newestIndex.toString())).append('\n');
         }
-        out.append("# Check value of the answers below; BiteCheck ignores answers changed outside BiteCheck.\n");
-        out.append("check = ").append(Toml.quote(checkValue(key()))).append('\n');
+        out.append("# Check value of newest_index and the answers below; BiteCheck ignores them if they were changed outside BiteCheck.\n");
+        out.append("check_version = ").append(Toml.quote(String.valueOf(CHECK_VERSION))).append('\n');
+        out.append("check = ").append(Toml.quote(checkValue(key(), CHECK_VERSION))).append('\n');
         out.append("\n[auto_approved]\n");
         autoApproved.forEach((k, v) -> out.append(k).append(" = ").append(Toml.quote(v)).append('\n'));
         out.append("\n[allowed_anyway]\n");

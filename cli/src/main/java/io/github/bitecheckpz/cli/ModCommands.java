@@ -8,6 +8,7 @@ import io.github.bitecheckpz.core.ModLayout;
 import io.github.bitecheckpz.core.Records;
 import io.github.bitecheckpz.core.Registry;
 import io.github.bitecheckpz.core.Releases;
+import io.github.bitecheckpz.core.ReviewNotes;
 import io.github.bitecheckpz.core.Scanner;
 import io.github.bitecheckpz.core.Signatures;
 import io.github.bitecheckpz.core.SourceCheck;
@@ -24,7 +25,9 @@ import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.HashSet;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
+import java.util.Optional;
 import java.util.Set;
 import java.util.stream.Stream;
 
@@ -101,6 +104,8 @@ final class ModCommands {
         } else if (previous != null) {
             out.println("Previous release " + previous + " is not verified: review everything");
         }
+        printFlags(t, out);
+        printScanReport(t, out);
         out.println();
         int result = Main.OK;
         if ("published".equals(Toml.string(Toml.table(t.release, "build"), "type"))) {
@@ -357,7 +362,16 @@ final class ModCommands {
             notes = (scope.equals("full") ? "Full review" : "Review of the changes") + " of the source at commit "
                     + commit.substring(0, Math.min(7, commit.length())) + ", scan and source check.";
         }
-        Path file = Records.writeReview(t.releaseFile, null, me, verdict, scope, notes);
+        Integer changed = null;
+        if (scope.equals("diff")) {
+            changed = changedPercent(t);
+            if (changed > Records.MAX_DIFF_PERCENT) {
+                throw new IOException(changed + " % of the code changed since the previous release (more than "
+                        + Records.MAX_DIFF_PERCENT + " %): review everything (without --scope diff)");
+            }
+            out.println("Changed since the previous release: " + changed + " % of the code");
+        }
+        Path file = Records.writeReview(t.releaseFile, null, me, verdict, scope, notes, changed);
         Signatures.sign(file, privateKey(me));
         if (Signatures.verify(file, publicKey) != Signatures.Check.VALID) {
             Files.deleteIfExists(file);
@@ -366,6 +380,248 @@ final class ModCommands {
         }
         commitAndPush(out, t.registry, "Review " + t.mod + " " + t.version + ": " + verdict, "registry/mods/" + t.mod);
         out.println((verdict.equals("approve") ? "Approved " : "Rejected ") + t.mod + " " + t.version + ".");
+        return Main.OK;
+    }
+
+    /**
+     * How much of the source changed between the previous release's commit and this one: changed
+     * lines (added + removed) against all lines at this commit, in percent. Needs 'bcz inspect'.
+     */
+    static int changedPercent(Target t) throws IOException, Toml.TomlException, InterruptedException {
+        Path dir = reviewDir(t);
+        if (!Files.isDirectory(dir.resolve(".git"))) {
+            throw new IOException("run 'bcz inspect " + t.mod + "' first");
+        }
+        String commit = Toml.string(t.release, "commit");
+        String previous = t.registry.previousVersion(t.mod, t.version);
+        String base = Toml.string(t.registry.read(t.registry.releaseFile(t.mod, previous)), "commit");
+        String emptyTree = "4b825dc642cb6eb9a060e54bf8d69288fbee4904"; // git's empty tree: "everything" at a commit
+        long total = lines(Exec.git(dir, "diff", "--shortstat", emptyTree, commit), false);
+        long changed = lines(Exec.git(dir, "diff", "--shortstat", base, commit), true);
+        return total == 0 ? 100 : (int) Math.min(100, Math.round(changed * 100.0 / total));
+    }
+
+    /** From "3 files changed, 10 insertions(+), 4 deletions(-)": insertions, plus deletions if asked. */
+    static long lines(String shortstat, boolean withDeletions) {
+        long n = 0;
+        java.util.regex.Matcher m = java.util.regex.Pattern.compile("(\\d+) (insertion|deletion)").matcher(shortstat);
+        while (m.find()) {
+            if (m.group(2).equals("insertion") || withDeletions) {
+                n += Long.parseLong(m.group(1));
+            }
+        }
+        return n;
+    }
+
+    /**
+     * CI's scan report of the built jars, checked against scan_sha256 in the build record: an
+     * approval signs that record, so the reviewer co-signs exactly this report.
+     */
+    private static void printScanReport(Target t, PrintStream out) throws IOException {
+        Path build = t.registry.buildFile(t.mod, t.version);
+        Path report = build.resolveSibling(t.version + ".scan.txt");
+        if (!Files.isRegularFile(build) || !Files.isRegularFile(report)) {
+            return;
+        }
+        try {
+            String expected = Toml.string(t.registry.read(build), "scan_sha256");
+            if (expected == null || !expected.equals(Hashing.sha256Hex(report))) {
+                out.println("CI's scan report does not match its build record - do not approve; report it");
+                return;
+            }
+        } catch (Toml.TomlException e) {
+            out.println("Unreadable build record: " + e.getMessage());
+            return;
+        }
+        out.println("CI's scan of the built jars (your approval signs this report):");
+        Files.readAllLines(report).forEach(l -> out.println("  " + l));
+    }
+
+    /** Open flags of the mod (any severity), so a reviewer sees what others reported. */
+    private static void printFlags(Target t, PrintStream out) throws IOException {
+        Path dir = t.registry.flagsDir(t.mod);
+        if (!Files.isDirectory(dir)) {
+            return;
+        }
+        List<Path> files;
+        try (var list = Files.list(dir)) {
+            files = list.filter(p -> p.getFileName().toString().endsWith(".toml")).sorted().toList();
+        }
+        for (Path f : files) {
+            try {
+                Map<String, Object> flag = t.registry.read(f);
+                if (!"open".equals(Toml.string(flag, "status"))) {
+                    continue;
+                }
+                out.println("Open " + Toml.string(flag, "severity") + " flag on " + Toml.string(flag, "version") + ": "
+                        + Toml.string(flag, "description"));
+            } catch (Toml.TomlException e) {
+                out.println("Unreadable flag " + f.getFileName() + ": " + e.getMessage());
+            }
+        }
+    }
+
+    /**
+     * A volunteer rebuilds a release on their own computer: the source at the release commit, built
+     * with the release's build command against the local game, and the jar's SHA-256 compared with
+     * the signed build record. If it matches, a signed rebuild record goes into the registry
+     * ({@code rebuilds/<version>/<name>.toml}); the index then says how many people rebuilt it.
+     * Runs the mod's build command: do it in a virtual machine or a separate user account.
+     */
+    static int rebuild(Args a, PrintStream out) throws IOException, GeneralSecurityException, Toml.TomlException,
+            UsageException, InterruptedException {
+        pull(registry(a));
+        Target t = target(a);
+        Map<String, Object> build = Toml.table(t.release, "build");
+        if (!"rebuild".equals(Optional.ofNullable(Toml.string(build, "type")).orElse("rebuild"))) {
+            throw new IOException(t.mod + " " + t.version + " is a '" + Toml.string(build, "type")
+                    + "' release: only reproducible builds (type rebuild) can be rebuilt");
+        }
+        Path buildFile = t.registry.buildFile(t.mod, t.version);
+        if (!Files.isRegularFile(buildFile)) {
+            throw new IOException("CI has not written the build record yet");
+        }
+        List<String> expected = Registry.jarHashes(t.registry.read(buildFile));
+        String command = Toml.string(build, "command");
+        if (command == null || command.isBlank()) {
+            throw new IOException("the release has no build command");
+        }
+        Path gameDir = a.option("game-dir").map(Path::of).orElseThrow(() -> new UsageException(
+                "--game-dir <folder with java/projectzomboid.jar or projectzomboid.jar> (your game)"));
+        // the source at the release commit (the same clone bcz inspect uses)
+        Path dir = reviewDir(t);
+        String source = Toml.string(t.modInfo, "source");
+        String commit = Toml.string(t.release, "commit");
+        if (!Files.isDirectory(dir.resolve(".git"))) {
+            Files.createDirectories(dir.getParent());
+            Exec.git(null, "clone", "--quiet", "--", source, dir.toString());
+        }
+        Exec.git(dir, "fetch", "--quiet", "origin");
+        Exec.git(dir, "-c", "advice.detachedHead=false", "checkout", "--quiet", "--force", commit);
+        Exec.git(dir, "clean", "-fdxq");
+        out.println("Building " + t.mod + " " + t.version + " with: " + command);
+        out.println("(this runs the mod's build: use a virtual machine or a separate user account)");
+        ProcessBuilder pb = new ProcessBuilder(isWindows() ? List.of("cmd", "/c", command) : List.of("bash", "-c", command))
+                .directory(dir.toFile()).inheritIO();
+        pb.environment().put("PZ_GAME_DIR", gameDir.toAbsolutePath().toString());
+        int code = pb.start().waitFor();
+        if (code != 0) {
+            throw new IOException("the build failed (exit " + code + ")");
+        }
+        String artifact = Releases.artifacts(t.release).get(0);
+        Path jar = dir.resolve(artifact).normalize();
+        if (!jar.startsWith(dir) || !Files.isRegularFile(jar)) {
+            throw new IOException("the build did not produce " + artifact);
+        }
+        String sha = Hashing.sha256Hex(jar);
+        if (!expected.contains(sha)) {
+            out.println("Your build differs: " + sha + " (CI: " + String.join(", ", expected) + ")");
+            out.println("Compare with the CI build ('bcz fetch' in the mod's folder, then 'bcz jar-compare').");
+            return Main.ERROR;
+        }
+        String me = me(a);
+        Keys.PrivateKeyInfo key = privateKey(me);
+        Path file = t.registry.modDir(t.mod).resolve("rebuilds").resolve(t.version).resolve(me + ".toml");
+        Files.createDirectories(file.getParent());
+        Files.writeString(file, "mod = " + Toml.quote(t.mod) + "\nversion = " + Toml.quote(t.version)
+                + "\nbuild_sha256 = " + Toml.quote(Hashing.sha256Hex(buildFile)) + "\njar_sha256 = " + Toml.quote(sha)
+                + "\nrebuilder = " + Toml.quote(me) + "\nos = " + Toml.quote(System.getProperty("os.name"))
+                + "\njava = " + Toml.quote(System.getProperty("java.version"))
+                + "\nrebuilt_at = " + Toml.quote(java.time.Instant.now().truncatedTo(java.time.temporal.ChronoUnit.SECONDS).toString())
+                + "\n", java.nio.charset.StandardCharsets.UTF_8);
+        Signatures.sign(file, key);
+        commitAndPush(out, t.registry, "Rebuild of " + t.mod + " " + t.version + " by " + me, "registry/mods/" + t.mod);
+        out.println("Your build is identical to CI's (" + sha + "). Thank you: rebuild record written.");
+        return Main.OK;
+    }
+
+    private static boolean isWindows() {
+        return System.getProperty("os.name", "").toLowerCase(Locale.ROOT).contains("win");
+    }
+
+    /**
+     * A review note on a closed-source jar (one the registry cannot verify): the findings only,
+     * never code. Players see it in the launcher's warning about that jar.
+     */
+    static int note(Args a, PrintStream out) throws IOException, GeneralSecurityException, Toml.TomlException,
+            UsageException, InterruptedException {
+        Registry registry = registry(a);
+        pull(registry);
+        String target = a.positional(0, "jar or sha256");
+        Path jar = Path.of(target);
+        String sha = Hashing.isSha256Hex(target) ? target : Hashing.sha256Hex(jar);
+        String me = me(a);
+        String level = registry.reviewerLevel(me);
+        if (!level.equals("reviewer") && !level.equals("trusted")) {
+            throw new IOException("only reviewers write review notes ('" + me + "' is " + level + ")");
+        }
+        String findings = a.option("findings").orElseThrow(() -> new UsageException(
+                "write down what you found with --findings \"...\" (no code, no file contents)"));
+        String name = a.option("name").orElse(Hashing.isSha256Hex(target) ? "" : jar.getFileName().toString());
+        var publicKey = registry.reviewerKey(me)
+                .orElseThrow(() -> new IOException("no keys/reviewers/" + me + ".pub in the registry"));
+        Path file = ReviewNotes.write(registry, sha, name, me, findings);
+        Signatures.sign(file, privateKey(me));
+        if (Signatures.verify(file, publicKey) != Signatures.Check.VALID) {
+            Files.deleteIfExists(file);
+            Files.deleteIfExists(Signatures.signaturePath(file));
+            throw new IOException("your key does not match keys/reviewers/" + me + ".pub");
+        }
+        commitAndPush(out, registry, "Review note on " + (name.isEmpty() ? sha.substring(0, 12) : name),
+                "registry/notes");
+        out.println("Wrote the review note on " + sha + ".");
+        return Main.OK;
+    }
+
+    /**
+     * A trusted reviewer accepts the scanner's hard findings of a release (recorded in its build
+     * record), with a reason: without such an exception the release is never verified.
+     */
+    static int except(Args a, PrintStream out) throws IOException, GeneralSecurityException, Toml.TomlException,
+            UsageException, InterruptedException {
+        pull(registry(a));
+        Target t = target(a);
+        String me = me(a);
+        if (!t.registry.reviewerLevel(me).equals("trusted")) {
+            throw new IOException("only a trusted reviewer can accept hard findings");
+        }
+        String problem = Registry.selfReviewProblem(t.modInfo, me, t.registry.policy());
+        if (problem != null) {
+            throw new IOException(problem);
+        }
+        Path buildFile = t.registry.buildFile(t.mod, t.version);
+        if (!Files.isRegularFile(buildFile)) {
+            throw new IOException("CI has not written the build record yet");
+        }
+        Object recorded = t.registry.read(buildFile).get("hard_findings");
+        List<String> hard = new java.util.ArrayList<>();
+        if (recorded instanceof List<?> list) {
+            list.forEach(o -> hard.add(String.valueOf(o)));
+        }
+        if (hard.isEmpty()) {
+            throw new IOException(t.mod + " " + t.version + " has no hard findings in its build record; nothing to accept");
+        }
+        String reason = a.option("reason").orElseThrow(() -> new UsageException(
+                "say why " + String.join(", ", hard) + " is acceptable here with --reason \"...\""));
+        List<String> rules = a.option("rules").map(r -> List.of(r.split(","))).orElse(hard).stream()
+                .map(String::strip).filter(r -> !r.isEmpty()).toList();
+        if (!rules.containsAll(hard)) {
+            throw new UsageException("the build record has " + String.join(", ", hard)
+                    + "; accept all of them (or none): --rules " + String.join(",", hard));
+        }
+        var publicKey = t.registry.reviewerKey(me)
+                .orElseThrow(() -> new IOException("no keys/reviewers/" + me + ".pub in the registry"));
+        Path file = Records.writeException(t.releaseFile, me, rules, reason);
+        Signatures.sign(file, privateKey(me));
+        if (Signatures.verify(file, publicKey) != Signatures.Check.VALID) {
+            Files.deleteIfExists(file);
+            Files.deleteIfExists(Signatures.signaturePath(file));
+            throw new IOException("your key does not match keys/reviewers/" + me + ".pub");
+        }
+        commitAndPush(out, t.registry, "Exception for " + t.mod + " " + t.version + ": " + String.join(", ", rules),
+                "registry/mods/" + t.mod);
+        out.println("Accepted " + String.join(", ", rules) + " for " + t.mod + " " + t.version
+                + ". It still needs the normal approvals.");
         return Main.OK;
     }
 

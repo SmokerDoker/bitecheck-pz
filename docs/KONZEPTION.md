@@ -240,12 +240,12 @@ Grenze: Isolierung schützt Rechner und Daten, aber nicht den Spielstand oder Mu
 
 ## Umsetzungsstand und Abweichungen
 
-Das MVP ist als Projekt BiteCheck im Repo [SmokerDoker/bitecheck-pz](https://github.com/SmokerDoker/bitecheck-pz) umgesetzt (GPL-3.0, ohne fremde Abhängigkeiten, Java 17+). Gegenüber dieser Spezifikation weicht es an diesen Stellen ab:
+Das MVP ist als Projekt BiteCheck im Repo [SmokerDoker/bitecheck-pz](https://github.com/SmokerDoker/bitecheck-pz) umgesetzt (GPL-3.0, ohne fremde Abhängigkeiten, Java 17+). Was von dieser Spezifikation noch fehlt, steht gesammelt in [ROADMAP.md](ROADMAP.md). Gegenüber dieser Spezifikation weicht es an diesen Stellen bewusst ab:
 
 | Thema | Spezifikation | Umgesetzt |
 |---|---|---|
 | Signaturen | in den TOML-Dateien | als eigene Datei daneben (`1.0.0.toml.sig`), damit die signierte Datei unverändert bleibt; der Build-Eintrag der CI ist eine eigene Datei `1.0.0.build.toml` |
-| Daten für den Launcher | Register-Index allgemein | eine kleine, vom Register signierte Datei `index.toml` im Branch `index`, täglich neu erzeugt; älter als 7 Tage = nichts mehr automatisch freigeben, Rücksprung auf älteren Index wird abgelehnt |
+| Daten für den Launcher | Register-Index allgemein | eine kleine, vom Register signierte Datei `index.toml` im Branch `index`, neu erzeugt bei jedem Merge und monatlich; ein schwächerer Zeitstempel-Schlüssel bestätigt täglich, dass sie aktuell ist (höchstens 45 Tage); älter als 7 Tage = nichts mehr automatisch freigeben, Rücksprung auf älteren Index wird abgelehnt |
 | Launcher-Anbindung | Prüfschicht vor ZombieBuddy | eigenes Startprogramm, das vor dem Spielstart ZombieBuddys `mod_approvals.json` pro Jar-Hash setzt (geprüft = erlauben, markiert/gesperrt = verbieten, ungeprüft = ZombieBuddy fragt) und das Spiel über Steam startet; ZombieBuddy selbst bleibt unverändert |
 | Java-Laufzeit | nicht festgelegt | Startskripte nutzen das Java, das Project Zomboid mitbringt |
 | Scanner | ASM/SootUp | eigener Konstantenpool-Leser ohne Abhängigkeiten |
@@ -255,6 +255,13 @@ Das MVP ist als Projekt BiteCheck im Repo [SmokerDoker/bitecheck-pz](https://git
 | Dedizierte Server | nicht festgelegt | `--server-dir` und `--wrap` vor dem Serverstart, ZombieBuddy mit `policy=deny-new`; ungeprüfte Mods gibt der Admin einmal per `--allow <Hash>` frei; `--export`/`--compare` gleicht die Mod-Jars von Server und Spielern ab |
 | Website | Register-Website | eine statische Seite aus den Registerdateien (`bcz site`), mit Suche nach Name oder Jar-Hash; Veröffentlichung über GitHub Pages |
 | Freigabe-Regel | zwei Reviews, eines davon vertrauenswürdig | Start: ein Review von einem vertrauenswürdigen Reviewer, ohne automatische KI-Prüfung; später zwei Reviews (ein Neuling plus ein Reviewer mit höherem Rang), sobald es genug Reviewer gibt |
+| Widerruf eines Schlüssels | ab dem Widerrufszeitpunkt verliert nur, was danach signiert wurde | alles, was der Schlüssel je signiert hat, verliert sein Vertrauen: Signaturen tragen keinen vertrauenswürdigen Zeitpunkt, ein gestohlener Schlüssel könnte also auch „alte“ Dateien signieren; betroffene Releases müssen neu signiert und geprüft werden |
+| Schlüsselwechsel | neuer Schlüssel, vom alten signiert | `bcz rotate-key`: neuer `keys/authors/<name>.pub` mit Signatur des alten Schlüssels (`.pub.sig`), der alte bleibt in `keys/authors/<name>.previous/` nur für die Releases gültig, die er vor dem Wechsel signiert hatte (Liste `<id>.releases`, vom alten Schlüssel signiert), damit ein gestohlener alter Schlüssel keine neuen Releases signieren kann; ein widerrufener Schlüssel kann keinen Wechsel signieren; der Submitter-Check verlangt dafür sonst keinen Maintainer |
+| Harte Scanner-Funde | PR wird automatisch abgelehnt, freigegeben nur ohne harten Fund | die Prüfung im PR schlägt fehl, die CI vermerkt die Funde im signierten Build-Eintrag; freigegeben wird ein solches Release nur mit einer signierten Ausnahme eines vertrauenswürdigen Reviewers (`bcz except`), die im Index sichtbar bleibt (nötig für Mod-Manager wie ZombieBuddy und Jumpstart) |
+| Download-Spiegel | Register-Spiegel für alle Downloads | die von der CI gebauten Jars als GitHub-Release im Register-Repo (nur bei Lizenzen, die das erlauben); `bcz fetch` lädt von dort und prüft jeden Hash gegen den Build-Eintrag; der Launcher lädt selbst keine Mods |
+| Kritisches Flag | Release verliert sofort seine Freigabe | mit dem nächsten Index, den das Register beim Merge des Flags veröffentlicht: ein ungemergtes Flag würde jedem erlauben, jede Mod abzuschalten; ein Maintainer merged kritische Flags ohne inhaltliche Prüfung |
+| Gepinnter Build-Container ohne Netzwerk | Doppel-Build im gepinnten Container, Netzwerk aus | jeder Build läuft auf einer frischen, wegwerfbaren VM ohne Geheimnisse, auf zwei verschiedenen Runner-Images; die Downloads der Mod-Builds sichert die Abhängigkeitsprüfung von Gradle (`verification-metadata.xml` im Template); ein Netzwerk-Verbot würde die meisten Gradle-Builds brechen; dazu freiwillige Nachbauer (`bcz rebuild`) auf eigenen Rechnern |
+| Zweiter Build-Anbieter | zweiter Anbieter oder freiwillige Nachbauer | freiwillige Nachbauer (`bcz rebuild`), signierte Nachbau-Einträge im Register, im Index sichtbar |
 
 Erster gemeinsamer Test: Test-Kit mit drei harmlosen Test-Mods (geprüft, markiert, ungeprüft) und eigenem Test-Index. Danach: Registerschlüssel als GitHub-Secret einrichten (Anleitung im Repo unter [docs/SETUP-REGISTRY.md](SETUP-REGISTRY.md)) und erste echte Mods aufnehmen.
 
