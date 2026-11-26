@@ -50,6 +50,18 @@ public final class Lint {
 
     private void run() throws IOException {
         Path root = registry.root().toAbsolutePath().normalize();
+        // no symbolic links in the registry: a link's target could change without the file changing
+        for (String dir : List.of("registry", "keys")) {
+            if (Files.isDirectory(root.resolve(dir), java.nio.file.LinkOption.NOFOLLOW_LINKS)) {
+                try (Stream<Path> files = Files.walk(root.resolve(dir))) {
+                    for (Path f : files.filter(Files::isSymbolicLink).toList()) {
+                        error(f, "symbolic links are not allowed in the registry");
+                    }
+                }
+            } else if (Files.isSymbolicLink(root.resolve(dir))) {
+                error(root.resolve(dir), "symbolic links are not allowed in the registry");
+            }
+        }
         checkKeys(root.resolve("keys"));
         Path blocklist = root.resolve("registry/blocklist.toml");
         if (Files.isRegularFile(blocklist)) {
