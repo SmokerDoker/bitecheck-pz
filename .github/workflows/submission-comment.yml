@@ -1,0 +1,50 @@
+# Posts the results of "Mod submission" (builds, hashes, scan, bundled libraries) as a comment on the
+# pull request. A separate workflow because a pull request from a fork gets a read-only token: this
+# one runs in the base repository after the submission finished, runs no code from the pull
+# request, and only reads the text reports the submission uploaded (artifacts report-*).
+name: Submission comment
+
+on:
+  workflow_run:
+    workflows: ["Mod submission"]
+    types: [completed]
+
+permissions:
+  contents: read
+  pull-requests: write
+  actions: read
+
+jobs:
+  comment:
+    if: github.event.workflow_run.event == 'pull_request'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v8
+        with:
+          pattern: report-*
+          merge-multiple: true
+          path: report
+          run-id: ${{ github.event.workflow_run.id }}
+          github-token: ${{ github.token }}
+      - name: Comment on the pull request
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          CONCLUSION: ${{ github.event.workflow_run.conclusion }}
+          RUN_URL: ${{ github.event.workflow_run.html_url }}
+          HEAD_SHA: ${{ github.event.workflow_run.head_sha }}
+        run: |
+          set -euo pipefail
+          # the pull request from the run's commit (a fork could write any number into its report)
+          pr="$(gh pr list -R "$REPO" --state open --search "$HEAD_SHA" --json number,headRefOid                 --jq ".[] | select(.headRefOid == \"$HEAD_SHA\") | .number" | head -n 1)"
+          [ -n "$pr" ] || { echo "no open pull request for $HEAD_SHA"; exit 0; }
+          {
+            echo "## BiteCheck submission check: $CONCLUSION"
+            echo
+            for f in report/*.md; do
+              [ -f "$f" ] && head -c 60000 "$f" && echo
+            done
+            echo
+            echo "[Full run]($RUN_URL)"
+          } > comment.md
+          gh pr comment "$pr" -R "$REPO" --body-file comment.md

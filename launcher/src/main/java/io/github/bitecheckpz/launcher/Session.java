@@ -76,7 +76,7 @@ public final class Session {
                 biteCheckDir.resolve("cache"), state).fetch(now);
         Optional<Index> usable = index.index();
         Map<String, String> steamUpdated = platform.workshopUpdateTimes();
-        List<Planner.Row> rows = Planner.plan(mods, usable, now, approvals, state, steamUpdated);
+        List<Planner.Row> rows = Planner.plan(mods, usable, now, approvals, state, steamUpdated, trustedReviewers(config));
         Session session = new Session(platform, config, state, approvals, mods, index, rows, now, steamUpdated);
         if (state.tampered()) {
             session.notes.add("Your saved answers in " + biteCheckDir.resolve("state.toml") + " were changed outside "
@@ -90,11 +90,19 @@ public final class Session {
         if (platform.workshopContentDirs().isEmpty() && platform.steamRoots().isEmpty()) {
             session.notes.add("Steam was not found. Set steam_dir in " + biteCheckDir.resolve("config.toml") + ".");
         }
+        for (Planner.Row r : rows) {
+            if (r.status() == io.github.bitecheckpz.core.Verifier.Status.BLOCKED) {
+                // everybody who has the version installed hears it at the next start
+                session.notes.add(0, "Confirmed malware: " + r.mod().name() + " (" + r.jar().path() + "). BiteCheck never "
+                        + "loads it. Remove it: unsubscribe from it in Steam or delete " + r.mod().folder() + ".");
+            }
+        }
+        session.notes.addAll(compatNotes(rows, usable, gameVersion(platform.zomboidDir()), zombieBuddyVersion(rows)));
         session.newerVersion = UpdateCheck.newerVersion(config);
         session.newerVersion.map(UpdateCheck::note).ifPresent(session.notes::add);
         ProtectedInstall.removeOldCopy(platform, System.getenv()).ifPresent(session.notes::add);
         session.selfCheck = SelfCheck.check(config, biteCheckDir.resolve("cache"));
-        if (session.selfCheck.outcome() == SelfCheck.Outcome.CHANGED) {
+        if (session.selfCheck.outcome() == SelfCheck.Outcome.CHANGED || session.selfCheck.outcome() == SelfCheck.Outcome.REPAIRED) {
             session.notes.add(0, SelfCheck.note(session.selfCheck));
         }
         return session;
@@ -119,10 +127,72 @@ public final class Session {
     /** Re-plans after the player changed something (e.g. allowed a flagged mod). */
     public Session replan() {
         Session s = new Session(platform, config, state, approvals, mods, index,
-                Planner.plan(mods, index.index(), now, approvals, state, steamUpdated), now, steamUpdated);
+                Planner.plan(mods, index.index(), now, approvals, state, steamUpdated, trustedReviewers(config)), now,
+                steamUpdated);
         s.notes.addAll(notes);
         s.newerVersion = newerVersion;
         s.selfCheck = selfCheck;
         return s;
+    }
+
+    /**
+     * Verified mods whose release names game or ZombieBuddy versions that are not installed: a
+     * warning each (whether a mod works is not a safety question, so nothing is blocked).
+     */
+    static List<String> compatNotes(List<Planner.Row> rows, Optional<Index> index, String gameVersion,
+            String zombieBuddyVersion) {
+        List<String> notes = new ArrayList<>();
+        if (index.isEmpty()) {
+            return notes;
+        }
+        for (Planner.Row r : rows) {
+            if (r.status() != io.github.bitecheckpz.core.Verifier.Status.VERIFIED) {
+                continue;
+            }
+            List<String> off = io.github.bitecheckpz.core.Compat.mismatches(index.get().lookup(r.jar().sha256()).compat(),
+                    gameVersion, zombieBuddyVersion);
+            if (!off.isEmpty()) {
+                notes.add(r.mod().name() + " was made for " + String.join(" and ", off) + "; it may not work.");
+            }
+        }
+        return notes;
+    }
+
+    /** {@code trusted_reviewers = "bob, carol"} in config.toml: whose approvals the player accepts; empty: all. */
+    static java.util.Set<String> trustedReviewers(Config config) {
+        return config.string("trusted_reviewers").map(s -> java.util.Set.copyOf(java.util.Arrays.stream(s.split(","))
+                .map(String::strip).filter(x -> !x.isEmpty()).toList())).orElse(java.util.Set.of());
+    }
+
+    /** The game version the game wrote into Zomboid/version.txt ("42.22.2 3d39148846 ..."), or null. */
+    static String gameVersion(Path zomboidDir) {
+        try {
+            Path file = zomboidDir.resolve("version.txt");
+            if (!java.nio.file.Files.isRegularFile(file)) {
+                return null;
+            }
+            String first = java.nio.file.Files.readString(file).strip().split("\\s+")[0];
+            return first.matches("\\d+(\\.\\d+)*") ? first : null;
+        } catch (IOException | RuntimeException e) {
+            return null;
+        }
+    }
+
+    /** The version of the mod loader (ZombieBuddy, or Jumpstart.jar with ZombieBuddy built in), or null. */
+    static String zombieBuddyVersion(List<Planner.Row> rows) {
+        for (Planner.Row r : rows) {
+            if (r.mod().isLoader()) {
+                try (java.util.jar.JarFile jar = new java.util.jar.JarFile(r.jar().path().toFile())) {
+                    java.util.jar.Manifest m = jar.getManifest();
+                    String v = m == null ? null : m.getMainAttributes().getValue("Implementation-Version");
+                    if (v != null && !v.isBlank()) {
+                        return v.strip();
+                    }
+                } catch (IOException | RuntimeException e) {
+                    // unknown
+                }
+            }
+        }
+        return null;
     }
 }

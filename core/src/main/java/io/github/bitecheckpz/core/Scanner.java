@@ -49,6 +49,12 @@ public final class Scanner {
         public long count(Severity s) {
             return findings.stream().filter(f -> f.severity() == s).count();
         }
+
+        /** The rules of the hard findings, sorted, each once (e.g. {@code [process, unsafe]}). */
+        public List<String> hardRules() {
+            return findings.stream().filter(f -> f.severity() == Severity.HARD).map(Finding::rule)
+                    .distinct().sorted().toList();
+        }
     }
 
     private record Rule(Severity severity, String rule, String what) {
@@ -86,7 +92,7 @@ public final class Scanner {
             new Object[] {"java/io/ObjectInputStream", new Rule(Severity.SOFT, "serialization", "deserializes Java objects")},
             new Object[] {"java/awt/Robot", new Rule(Severity.SOFT, "system", "simulates keyboard/mouse input")},
             new Object[] {"java/awt/datatransfer/", new Rule(Severity.SOFT, "system", "accesses the clipboard")},
-            new Object[] {"java/awt/Desktop", new Rule(Severity.SOFT, "system", "opens files or URLs in other programs")});
+            new Object[] {"java/awt/Desktop", new Rule(Severity.HARD, "system", "opens files or URLs in other programs")});
 
     // ---- rules on referenced members: owner.name ----
 
@@ -127,6 +133,10 @@ public final class Scanner {
             ".ssh", "id_rsa", "login data", "cookies", "local state", "wallet", "discord", "leveldb",
             "loginusers.vdf", "ssfn", "config.vdf", "token", "password", "appdata", "powershell", "cmd.exe",
             "/bin/sh", "/bin/bash", "webhook", "pastebin", "http://", "https://");
+
+    /** A class that extends one of these defines classes itself: it can run code the scan never saw. */
+    private static final Set<String> CLASS_LOADERS = Set.of("java/lang/ClassLoader", "java/security/SecureClassLoader",
+            "java/net/URLClassLoader");
 
     private static final Set<String> NATIVE_SUFFIXES = Set.of(".dll", ".so", ".dylib", ".jnilib", ".exe");
     private static final Set<String> ARCHIVE_SUFFIXES = Set.of(".jar", ".zip", ".war", ".class.bin");
@@ -182,6 +192,10 @@ public final class Scanner {
                     continue;
                 }
                 applyRules(pool, where, findings, seen);
+                if (pool.superClass != null && CLASS_LOADERS.contains(pool.superClass)) {
+                    add(findings, seen, new Finding(Severity.HARD, "code-loading", where,
+                            "is its own class loader (extends " + pool.superClass.replace('/', '.') + ")"));
+                }
             }
         }
         if (classCount >= 10 && obfuscatedNames * 10 >= classCount * 8) {
@@ -354,6 +368,8 @@ public final class Scanner {
         final Set<String> strings = new LinkedHashSet<>();
         /** Type descriptors that stand alone ("Lpkg/Name;"): field types and annotation types. */
         final Set<String> descriptors = new LinkedHashSet<>();
+        /** The class's direct superclass (internal name), or null. */
+        String superClass;
 
         static ConstantPool read(byte[] bytes) throws IOException {
             DataInputStream in = new DataInputStream(new ByteArrayInputStream(bytes));
@@ -415,6 +431,16 @@ public final class Scanner {
                     }
                     pool.members.add(owner + "." + at(utf8, nat[0]));
                 }
+            }
+            try {
+                in.readUnsignedShort(); // access flags
+                in.readUnsignedShort(); // this class
+                int superIndex = in.readUnsignedShort();
+                if (superIndex > 0 && superIndex < count && classNameIndex[superIndex] != 0) {
+                    pool.superClass = at(utf8, classNameIndex[superIndex]);
+                }
+            } catch (IOException e) {
+                // a class file that ends after its constant pool: no superclass to check
             }
             return pool;
         }

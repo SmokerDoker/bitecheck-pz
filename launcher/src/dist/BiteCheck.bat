@@ -4,6 +4,8 @@ rem Uses the Java runtime that comes with Project Zomboid, so no separate Java i
 setlocal EnableDelayedExpansion
 
 set "JAR=%~dp0BiteCheck.jar"
+rem BiteCheck repaired its own jar while it ran: put the signed copy in place before starting
+if exist "%~dp0BiteCheck.jar.repair" move /y "%~dp0BiteCheck.jar.repair" "%JAR%" >nul
 set "JAVAW="
 rem BITECHECK_JAVA=C:\path\to\javaw.exe overrides the search (e.g. on a dedicated server).
 if defined BITECHECK_JAVA if exist "%BITECHECK_JAVA%" set "JAVAW=%BITECHECK_JAVA%"

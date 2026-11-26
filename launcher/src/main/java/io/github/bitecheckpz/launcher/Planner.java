@@ -105,6 +105,17 @@ public final class Planner {
     /** @param steamUpdated when Steam last updated each Workshop item, see {@link Platform#workshopUpdateTimes()} */
     public static List<Row> plan(List<JavaMods.JavaMod> mods, Optional<Index> index, Instant now,
             ZombieBuddyApprovals approvals, LauncherState state, Map<String, String> steamUpdated) {
+        return plan(mods, index, now, approvals, state, steamUpdated, java.util.Set.of());
+    }
+
+    /**
+     * @param trustedReviewers the reviewers the player trusts ({@code trusted_reviewers} in
+     *                         config.toml); empty: every reviewer the registry accepts. A verified jar
+     *                         none of them approved counts as unverified for this player.
+     */
+    public static List<Row> plan(List<JavaMods.JavaMod> mods, Optional<Index> index, Instant now,
+            ZombieBuddyApprovals approvals, LauncherState state, Map<String, String> steamUpdated,
+            java.util.Set<String> trustedReviewers) {
         boolean stale = index.isPresent() && index.get().isStale(now);
         List<Row> rows = new ArrayList<>();
         for (JavaMods.JavaMod mod : mods) {
@@ -117,6 +128,18 @@ public final class Planner {
                 if (status == Verifier.Status.VERIFIED && stale) {
                     status = Verifier.Status.UNVERIFIED;
                     info = "index is out of date, cannot confirm verification";
+                }
+                if (status == Verifier.Status.VERIFIED && !trustedReviewers.isEmpty()) {
+                    List<String> by = index.get().reviewers(sha);
+                    if (by.stream().noneMatch(trustedReviewers::contains)) {
+                        status = Verifier.Status.UNVERIFIED;
+                        info = "verified" + (by.isEmpty() ? "" : " by " + String.join(", ", by))
+                                + ", but by none of the reviewers you trust";
+                    }
+                }
+                String note = index.map(i -> i.note(sha)).orElse(null);
+                if (note != null) {
+                    info = info + "; " + note; // open info or suspicion flags, review notes
                 }
                 Scanner.Report scan = null;
                 boolean suspicious = false;

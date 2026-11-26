@@ -131,3 +131,13 @@ Source public, no obfuscation, no native code, no runtime code loading, no proce
 game classes are `compileOnly` (never bundled). Network access and file access outside `~/Zomboid`
 must be explained in the mod description. See the BiteCheck
 [CONTRIBUTING.md](https://github.com/SmokerDoker/bitecheck-pz/blob/main/CONTRIBUTING.md).
+
+## Dependency verification
+
+`gradle/verification-metadata.xml` lists the SHA-256 of every plugin and library the build
+downloads; Gradle refuses a download that does not match, locally and in BiteCheck's CI. When you
+add or update a plugin or a library, record its hashes once and commit the file:
+
+```sh
+./gradlew --write-verification-metadata sha256 build
+```

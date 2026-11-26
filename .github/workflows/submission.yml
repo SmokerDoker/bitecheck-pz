@@ -112,6 +112,7 @@ jobs:
         env:
           RELEASE: ${{ matrix.release }}
           KEY: ${{ matrix.key }}
+          HARD_FINDINGS: fail
         run: |
           echo "### Release \`$KEY\`" >> "$GITHUB_STEP_SUMMARY"
           bash .github/scripts/check-builds.sh cli/build/install/bcz/bin/bcz "pr/$RELEASE" pr
@@ -122,3 +123,17 @@ jobs:
           path: final/
           if-no-files-found: ignore
           retention-days: 90
+      - name: Keep the report for the pull request comment
+        if: always()
+        env:
+          PR: ${{ github.event.pull_request.number }}
+        run: |
+          mkdir -p report
+          echo "$PR" > report/pr.txt
+          cp "$GITHUB_STEP_SUMMARY" "report/${{ matrix.key }}.md" 2>/dev/null || true
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: report-${{ matrix.key }}
+          path: report/
+          retention-days: 7

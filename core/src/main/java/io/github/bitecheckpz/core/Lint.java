@@ -20,7 +20,8 @@ public final class Lint {
     private static final Set<String> VERDICTS = Set.of("approve", "reject", "questions");
     private static final Set<String> SCOPES = Set.of("full", "diff");
     private static final Set<String> SEVERITIES = Set.of("info", "suspicion", "critical");
-    private static final Set<String> FLAG_STATUSES = Set.of("open", "resolved", "confirmed");
+    /** abuse: a maintainer found the flag was raised in bad faith (counts against the reporter). */
+    private static final Set<String> FLAG_STATUSES = Set.of("open", "resolved", "confirmed", "abuse");
     private static final Set<String> MOD_STATUSES = Set.of("active", "pending", "suspended", "withdrawn");
 
     private final Registry registry;
@@ -70,13 +71,29 @@ public final class Lint {
                         error(policy, key + " must be a number from 1 to 10");
                     }
                 }
-                if (doc.containsKey("publisher_may_review") && !(doc.get("publisher_may_review") instanceof Boolean)) {
-                    error(policy, "publisher_may_review must be true or false");
+                for (String key : List.of("publisher_may_review", "newcomers_count")) {
+                    if (doc.containsKey(key) && !(doc.get(key) instanceof Boolean)) {
+                        error(policy, key + " must be true or false");
+                    }
                 }
                 try {
                     reviewPolicy = registry.policy();
                 } catch (Toml.TomlException e) {
                     error(policy, e.getMessage());
+                }
+            }
+        }
+        Path notes = ReviewNotes.dir(registry);
+        if (Files.isDirectory(notes)) {
+            for (Path f : list(notes)) {
+                String name = f.getFileName().toString();
+                if (name.endsWith(".toml")) {
+                    String problem = ReviewNotes.problem(registry, f);
+                    if (problem != null) {
+                        error(f, problem);
+                    }
+                } else if (!name.endsWith(".toml.sig")) {
+                    error(f, "unexpected file in registry/notes");
                 }
             }
         }
@@ -107,6 +124,36 @@ public final class Lint {
                 String name = f.getFileName().toString().replace(".pub", "");
                 if (!f.getParent().equals(keys) && !Registry.NAME.matcher(name).matches()) {
                     error(f, "key file name must be a valid name");
+                }
+            }
+        }
+        // a key change (bcz rotate-key): the new keys/authors/<name>.pub is signed by a key it replaced
+        Path authors = keys.resolve("authors");
+        if (Files.isDirectory(authors)) {
+            try (Stream<Path> files = Files.list(authors)) {
+                for (Path sig : files.filter(p -> p.getFileName().toString().endsWith(".pub.sig")).toList()) {
+                    String file = sig.getFileName().toString();
+                    String name = file.substring(0, file.length() - ".pub.sig".length());
+                    Path pub = authors.resolve(name + ".pub");
+                    Path previous = authors.resolve(name + ".previous");
+                    boolean proven = false;
+                    if (Files.isRegularFile(pub) && Files.isDirectory(previous)) {
+                        try (Stream<Path> old = Files.list(previous)) {
+                            for (Path p : old.filter(x -> x.toString().endsWith(".pub")).toList()) {
+                                try {
+                                    Keys.PublicKeyInfo oldKey = Keys.readPublic(p);
+                                    // a revoked key (or one of a malware author) cannot vouch for a new one
+                                    proven |= !registry.isRevokedKey(oldKey) && !registry.malwareAuthors().contains(name)
+                                            && Signatures.verify(pub, oldKey) == Signatures.Check.VALID;
+                                } catch (Exception e) {
+                                    // reported as an invalid key above
+                                }
+                            }
+                        }
+                    }
+                    if (!proven) {
+                        error(sig, "a key change must be signed by a previous key in keys/authors/" + name + ".previous/");
+                    }
                 }
             }
         }
@@ -191,13 +238,13 @@ public final class Lint {
         if (status != null && !MOD_STATUSES.contains(status)) {
             error(modFile, "status must be active, pending, suspended or withdrawn");
         }
-        Optional<Keys.PublicKeyInfo> authorKey = Optional.empty();
+        List<Keys.PublicKeyInfo> authorKeys = List.of();
         if (author == null || !Registry.NAME.matcher(author).matches()) {
             error(modFile, Toml.string(modInfo, "publisher") != null ? "publisher must be a valid name"
                     : "author must be a valid name, or set a publisher who signs the releases");
         } else if (!unsigned) {
-            authorKey = registry.authorKey(author);
-            if (authorKey.isEmpty()) {
+            authorKeys = registry.authorKeys(author);
+            if (authorKeys.isEmpty()) {
                 error(modFile, registry.revocation("authors", author).map(r -> "key of '" + author + "' " + r)
                         .orElse("no key keys/authors/" + author + ".pub"));
             }
@@ -213,8 +260,15 @@ public final class Lint {
                     }
                 } else if (name.endsWith(".build.toml")) {
                     checkBuild(f, mod);
+                } else if (name.endsWith(".scan.txt")) {
+                    // the scanner's report: its hash is in the signed build record
+                    Path build = f.resolveSibling(name.substring(0, name.length() - ".scan.txt".length()) + ".build.toml");
+                    Map<String, Object> record = Files.isRegularFile(build) ? parse(build) : null;
+                    if (record == null || !Hashing.sha256Hex(f).equals(Toml.string(record, "scan_sha256"))) {
+                        error(f, "a scan report must match scan_sha256 of its build record");
+                    }
                 } else if (name.endsWith(".toml")) {
-                    checkRelease(f, mod, unsigned, authorKey);
+                    checkRelease(f, mod, unsigned, authorKeys, author);
                 } else {
                     error(f, "unexpected file");
                 }
@@ -230,6 +284,33 @@ public final class Lint {
                 }
             }
         }
+        Path rebuilds = modDir.resolve("rebuilds");
+        if (Files.isDirectory(rebuilds)) {
+            for (Path versionDir : list(rebuilds)) {
+                String version = versionDir.getFileName().toString();
+                Path build = Registry.VERSION.matcher(version).matches() ? registry.buildFile(mod, version) : null;
+                Map<String, Object> record = build != null && Files.isRegularFile(build) ? parse(build) : null;
+                for (Path f : list(versionDir)) {
+                    if (f.getFileName().toString().endsWith(".toml")) {
+                        String problem = record == null ? "no build record for this version"
+                                : Rebuilds.problem(registry, f, mod, version, Hashing.sha256Hex(build), Registry.jarHashes(record));
+                        if (problem != null) {
+                            error(f, problem);
+                        }
+                    }
+                }
+            }
+        }
+        Path exceptions = modDir.resolve("exceptions");
+        if (Files.isDirectory(exceptions)) {
+            for (Path versionDir : list(exceptions)) {
+                for (Path f : list(versionDir)) {
+                    if (f.getFileName().toString().endsWith(".toml")) {
+                        checkException(f, mod, versionDir.getFileName().toString());
+                    }
+                }
+            }
+        }
         Path flags = modDir.resolve("flags");
         if (Files.isDirectory(flags)) {
             for (Path f : list(flags)) {
@@ -240,7 +321,7 @@ public final class Lint {
         }
     }
 
-    private void checkRelease(Path f, String mod, boolean unsigned, Optional<Keys.PublicKeyInfo> authorKey) {
+    private void checkRelease(Path f, String mod, boolean unsigned, List<Keys.PublicKeyInfo> authorKeys, String author) {
         Map<String, Object> doc = parse(f);
         if (doc == null) {
             return;
@@ -265,6 +346,14 @@ public final class Lint {
         }
         boolean published = "published".equals(type);
         boolean workshop = "workshop".equals(type);
+        Map<String, Object> compat = Toml.table(doc, "compat");
+        for (String field : compat.keySet()) {
+            if (!Compat.FIELDS.containsKey(field)) {
+                error(f, "[compat] knows only game and zombiebuddy, not " + field);
+            } else if (!Compat.isValid(Toml.string(compat, field))) {
+                error(f, "[compat] " + field + " must be a range like \">=42.13, <43\"");
+            }
+        }
         List<String> artifacts = Releases.artifacts(doc);
         if (artifacts.isEmpty()) {
             error(f, "[build] needs artifact (or artifacts = [...] for a published release)");
@@ -311,8 +400,15 @@ public final class Lint {
         if (command != null && (command.contains("\n") || command.contains("\r"))) {
             error(f, "[build] command must be a single line");
         }
-        if (!unsigned && authorKey.isPresent()) {
-            Signatures.Check sig = Signatures.verify(f, authorKey.get());
+        if (!unsigned && !authorKeys.isEmpty()) {
+            // the current key, or one it replaced for the releases it signed before (bcz rotate-key)
+            Signatures.Check sig = Signatures.Check.INVALID;
+            for (Keys.PublicKeyInfo k : registry.authorKeysFor(author, f)) {
+                sig = Signatures.verify(f, k);
+                if (sig == Signatures.Check.VALID) {
+                    break;
+                }
+            }
             if (sig != Signatures.Check.VALID) {
                 error(f, "publisher signature: " + sig.description());
             }
@@ -384,6 +480,49 @@ public final class Lint {
         }
     }
 
+    /** An exception for hard findings: from a trusted reviewer, for one build record, with rules and a reason. */
+    private void checkException(Path f, String mod, String version) {
+        Map<String, Object> doc = parse(f);
+        if (doc == null) {
+            return;
+        }
+        String fileName = f.getFileName().toString();
+        String reviewer = fileName.substring(0, fileName.length() - ".toml".length());
+        if (!reviewer.equals(Toml.string(doc, "reviewer"))) {
+            error(f, "reviewer must match the file name");
+        }
+        try {
+            if (!registry.reviewerLevel(reviewer).equals("trusted")) {
+                error(f, "only a trusted reviewer can accept hard findings");
+            }
+        } catch (IOException | Toml.TomlException e) {
+            error(f, "cannot read the reviewer levels: " + e.getMessage());
+        }
+        if (!mod.equals(Toml.string(doc, "mod")) || !version.equals(Toml.string(doc, "version"))) {
+            error(f, "mod/version do not match the folder");
+        }
+        if (!Hashing.isSha256Hex(Toml.string(doc, "build_sha256"))) {
+            error(f, "needs build_sha256");
+        }
+        if (!(doc.get("rules") instanceof List<?> rules) || rules.isEmpty()) {
+            error(f, "needs rules = [\"...\"]");
+        }
+        String reason = Toml.string(doc, "reason");
+        if (reason == null || reason.isBlank()) {
+            error(f, "needs a reason");
+        }
+        var key = registry.reviewerKey(reviewer);
+        if (key.isEmpty()) {
+            error(f, registry.revocation("reviewers", reviewer).map(r -> "key of '" + reviewer + "' " + r)
+                    .orElse("no key keys/reviewers/" + reviewer + ".pub"));
+        } else {
+            Signatures.Check sig = Signatures.verify(f, key.get());
+            if (sig != Signatures.Check.VALID) {
+                error(f, "reviewer signature: " + sig.description());
+            }
+        }
+    }
+
     private void checkFlag(Path f, String mod) {
         Map<String, Object> doc = parse(f);
         if (doc == null) {
@@ -401,7 +540,7 @@ public final class Lint {
             error(f, "severity must be info, suspicion or critical");
         }
         if (!FLAG_STATUSES.contains(String.valueOf(Toml.string(doc, "status")))) {
-            error(f, "status must be open, resolved or confirmed");
+            error(f, "status must be open, resolved, confirmed or abuse");
         }
         require(f, doc, "description");
     }

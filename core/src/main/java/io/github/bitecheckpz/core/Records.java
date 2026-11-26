@@ -33,6 +33,37 @@ public final class Records {
      */
     public static Path writeBuildRecord(Path releaseFile, List<Path> jars, List<String> builders)
             throws IOException, Toml.TomlException {
+        return writeBuildRecord(releaseFile, jars, builders, null);
+    }
+
+    /**
+     * @param hardFindings the scanner's hard rules found in the jars ({@code hard_findings}); CI
+     *                     always passes them (an empty list when there are none), null leaves the
+     *                     field out (records from before this field)
+     */
+    public static Path writeBuildRecord(Path releaseFile, List<Path> jars, List<String> builders, List<String> hardFindings)
+            throws IOException, Toml.TomlException {
+        return writeBuildRecord(releaseFile, jars, builders, hardFindings, null);
+    }
+
+    /**
+     * @param scanReport the scanner's full report on the jars; written next to the record as
+     *                   {@code <version>.scan.txt}, its SHA-256 as {@code scan_sha256} in the record,
+     *                   so a review (which signs the record) co-signs the report the reviewer saw
+     */
+    public static Path writeBuildRecord(Path releaseFile, List<Path> jars, List<String> builders,
+            List<String> hardFindings, String scanReport) throws IOException, Toml.TomlException {
+        String scanSha = null;
+        if (scanReport != null) {
+            Path report = releaseFile.resolveSibling(Toml.string(Toml.parse(releaseFile), "version") + ".scan.txt");
+            writeNew(report, scanReport);
+            scanSha = Hashing.sha256Hex(report);
+        }
+        return writeBuildRecordOnly(releaseFile, jars, builders, hardFindings, scanSha);
+    }
+
+    private static Path writeBuildRecordOnly(Path releaseFile, List<Path> jars, List<String> builders,
+            List<String> hardFindings, String scanSha) throws IOException, Toml.TomlException {
         Map<String, Object> release = Toml.parse(releaseFile);
         String mod = Toml.string(release, "mod");
         String version = Toml.string(release, "version");
@@ -71,6 +102,14 @@ public final class Records {
         out.append("built_at = ").append(Toml.quote(Instant.now().truncatedTo(ChronoUnit.SECONDS).toString()))
                 .append('\n');
         out.append("builders = ").append(array(builders)).append('\n');
+        if (scanSha != null) {
+            out.append("scan_sha256 = ").append(Toml.quote(scanSha)).append('\n');
+        }
+        if (hardFindings != null) {
+            // the scanner's hard findings in any of the jars: such a release is verified only with a
+            // signed exception from a trusted reviewer (see Verifier)
+            out.append("hard_findings = ").append(array(List.copyOf(new java.util.TreeSet<>(hardFindings)))).append('\n');
+        }
         Path target = releaseFile.resolveSibling(version + ".build.toml");
         writeNew(target, out.toString());
         return target;
@@ -92,6 +131,16 @@ public final class Records {
      */
     public static Path writeReview(Path releaseFile, Path jar, String reviewer, String verdict, String scope,
             String notes) throws IOException, Toml.TomlException {
+        return writeReview(releaseFile, jar, reviewer, verdict, scope, notes, null);
+    }
+
+    /**
+     * @param changedPercent diff reviews: how much of the source changed since the base release
+     *                       ({@code changed_percent}); above {@link #MAX_DIFF_PERCENT} a diff
+     *                       review does not count (the update needs a full review)
+     */
+    public static Path writeReview(Path releaseFile, Path jar, String reviewer, String verdict, String scope,
+            String notes, Integer changedPercent) throws IOException, Toml.TomlException {
         Registry.requireName(reviewer, "reviewer");
         if (!List.of("approve", "reject", "questions").contains(verdict)) {
             throw new IllegalArgumentException("verdict must be approve, reject or questions");
@@ -132,6 +181,9 @@ public final class Records {
             String baseCommit = Toml.string(Toml.parse(registry.releaseFile(mod, base)), "commit");
             out.append("base_version = ").append(Toml.quote(base)).append('\n');
             out.append("base_commit = ").append(Toml.quote(String.valueOf(baseCommit))).append('\n');
+            if (changedPercent != null) {
+                out.append("changed_percent = ").append(changedPercent).append('\n');
+            }
         }
         out.append("reviewed_at = ").append(Toml.quote(Instant.now().truncatedTo(ChronoUnit.SECONDS).toString()))
                 .append('\n');
@@ -140,6 +192,47 @@ public final class Records {
         writeNew(target, out.toString());
         return target;
     }
+
+    /**
+     * Writes {@code exceptions/<version>/<reviewer>.toml}: a trusted reviewer accepts the scanner's
+     * hard findings ({@code rules}) of the release's build record, which must exist, with a reason.
+     * Sign the file afterwards with the reviewer's key.
+     */
+    public static Path writeException(Path releaseFile, String reviewer, List<String> rules, String reason)
+            throws IOException, Toml.TomlException {
+        Registry.requireName(reviewer, "reviewer");
+        if (rules.isEmpty() || rules.stream().anyMatch(r -> !r.matches("[a-z][a-z-]{0,30}"))) {
+            throw new IllegalArgumentException("name the accepted rules, e.g. unsafe,process");
+        }
+        if (reason == null || reason.isBlank()) {
+            throw new IllegalArgumentException("say why the findings are acceptable");
+        }
+        Map<String, Object> release = Toml.parse(releaseFile);
+        String mod = Toml.string(release, "mod");
+        String version = Toml.string(release, "version");
+        Registry.requireName(mod, "mod");
+        Registry.requireVersion(version);
+        Path buildFile = releaseFile.resolveSibling(version + ".build.toml");
+        if (!Files.isRegularFile(buildFile)) {
+            throw new IOException("no build record " + buildFile.getFileName() + " yet");
+        }
+        Path modDir = releaseFile.toAbsolutePath().getParent().getParent();
+        Path target = modDir.resolve("exceptions").resolve(version).resolve(reviewer + ".toml");
+        StringBuilder out = new StringBuilder();
+        out.append("# A trusted reviewer accepts the scanner's hard findings of this release.\n");
+        out.append("mod = ").append(Toml.quote(mod)).append('\n');
+        out.append("version = ").append(Toml.quote(version)).append('\n');
+        out.append("build_sha256 = ").append(Toml.quote(Hashing.sha256Hex(buildFile))).append('\n');
+        out.append("reviewer = ").append(Toml.quote(reviewer)).append('\n');
+        out.append("rules = ").append(array(List.copyOf(new java.util.TreeSet<>(rules)))).append('\n');
+        out.append("reason = ").append(Toml.quote(reason.strip())).append('\n');
+        Files.createDirectories(target.getParent());
+        writeNew(target, out.toString());
+        return target;
+    }
+
+    /** A diff review counts only if at most this share of the source changed since the base release. */
+    public static final int MAX_DIFF_PERCENT = 30;
 
     private static void writeNew(Path target, String content) throws IOException {
         if (Files.exists(target)) {

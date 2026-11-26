@@ -48,6 +48,8 @@ BiteCheck works together with [ZombieBuddy](https://github.com/zed-0xff/ZombieBu
 - **Flagged mods** are not loaded unless you allow them anyway (double confirmation).
 - **Mods with confirmed malware** are on a block list and never load.
 - **Lua mods** are loaded by the game itself and are not affected by BiteCheck at all.
+- **Notes and versions.** BiteCheck shows what reviewers noted about a mod (open "info" or "suspicion" flags, review notes on closed-source mods) and warns when a verified mod was made for another version of the game or ZombieBuddy.
+- **Your own reviewers** (optional): with `trusted_reviewers = "bob, carol"` in `~/.bitecheck/config.toml`, a mod counts as verified for you only if one of them approved it.
 
 Under the hood BiteCheck writes allow/deny decisions per jar hash into ZombieBuddy's `~/.zombie_buddy/mod_approvals.json` and never touches anything else. To check your mods every time you press Play in Steam, put BiteCheck into the game's launch options (the launcher's "Steam setup…" button shows the exact line, e.g. `"…\BiteCheck.bat" --wrap %command% -agentlib:zbNative --`). Without it, ZombieBuddy's own questions still protect you. With Jumpstart, its `Jumpstart.jar` (ZombieBuddy built in) is the loader; BiteCheck checks it like ZombieBuddy's jar and adds no ZombieBuddy option to that line. Dedicated servers run BiteCheck the same way before the server starts, see [docs/SERVER.md](docs/SERVER.md). The launcher runs on Windows, macOS and Linux with the Java runtime that comes with Project Zomboid; no separate Java install is needed. It updates itself to new releases, and installs one only if its hash is in the release's signed `SHA256SUMS.txt`.
 
@@ -65,32 +67,9 @@ Your mod is never blocked while it waits for review: players can load it as an u
 
 ## Status
 
-**Public test.** The launcher, the registry and the review process work end to end; we are looking for players and mod authors to try them.
+**Public test.** The launcher, the registry and the review process work end to end; we are looking for players and mod authors to try them. During start-up one review by a trusted reviewer approves a release (see `registry/policy.toml`).
 
-<details>
-<summary>What is done</summary>
-
-- [x] Registry format and repository structure
-- [x] `bcz` CLI: keys, signatures, build records, reviews, verification, scanner, lint, index
-- [x] Launcher for Windows, macOS and Linux on top of [ZombieBuddy](https://github.com/zed-0xff/ZombieBuddy)
-- [x] CI pipeline: double build, hash comparison, scanner, registry signature, signed index
-- [x] Test kit with three harmless test mods (`scripts/make-test-kit.sh`)
-- [x] Steam launch options integration (`--wrap %command%`) and dedicated server mode ([docs/SERVER.md](docs/SERVER.md))
-- [x] Registry website generated from the registry files (`bcz site`, GitHub Pages)
-- [x] Installers for Windows, macOS and Linux built by GitHub Actions (`release.yml`)
-- [x] Start-up policy: one trusted review, publishers may review upstream mods (later two reviews, see `registry/policy.toml`)
-- [x] Eleven mods prepared as pending entries with preliminary reviews ([docs/reviews](docs/reviews/README.md))
-- [ ] First test with real players (running)
-- [x] Registry key set up ([docs/SETUP-REGISTRY.md](docs/SETUP-REGISTRY.md)); first verified mod: zb-hello-world
-- [x] `bcz login` / `bcz submit` (GitHub integration), [mod template](template/README.md), [Gradle plugin](gradle-plugin/README.md) and submit action
-- [x] CI rebuilds mods against the Project Zomboid dedicated server (only its `projectzomboid.jar`, fetched with DepotDownloader)
-- [x] Reviewer commands: `bcz status`, `inspect` (with diffs to the last verified release), `approve`, `reject`, `flag`
-- [x] Key revocation (`keys/revoked.toml`), reviewer levels (`bcz trust`, `bcz reviewers`), ownership check for pull requests
-- [x] Gradle plugin published to the Plugin Portal (`io.github.smokerdoker.bitecheck` 0.1.0)
-- [x] Submission tested end to end with the template: `bcz submit` by hand and the template's GitHub Action; CI's jar is identical to a local Windows build
-- [ ] Submission from a fork tested (an author without write access to the registry)
-
-</details>
+What is still to come is collected in one place: [docs/ROADMAP.md](docs/ROADMAP.md).
 
 ## The `bcz` command line tool
 
@@ -102,6 +81,11 @@ bcz status                                  # reviewers: what is next for every 
 bcz inspect my-mod                          # source at the release commit, scan, source check
 bcz approve my-mod                          # sign your review (bcz publish my-mod: sign as publisher)
 bcz flag my-mod --severity critical --notes "…"   # report a problem with a release
+bcz except my-mod --reason "…"              # trusted reviewers: accept a release's hard scanner findings
+bcz note Mod.jar --findings "…"             # reviewers: findings on a closed-source jar (never code)
+bcz rebuild my-mod --game-dir <game>        # volunteers: rebuild a release yourself (runs its build: use a VM)
+bcz osv my-mod.jar                          # bundled libraries against known vulnerabilities
+bcz rotate-key                              # mod authors: a new key, signed by the old one
 bcz login                                   # mod authors: link GitHub (gh CLI), create your key
 bcz submit                                  # mod authors: submit the tagged release in this folder
 bcz fetch                                   # mod authors: is your jar the verified one? (replaces it only if you confirm)
@@ -131,7 +115,7 @@ cli/             The bcz command line tool
 launcher/        The player launcher (window + command line) and its start scripts
 examples/        Harmless test mods
 scripts/         make-test-kit.sh builds a self-contained test kit
-docs/            Setup and test guides
+docs/            Specification (KONZEPTION.md), roadmap, setup and test guides
 registry/        Mod entries, releases, reviews and flags (see registry/README.md)
 keys/            Public keys of the registry, authors and reviewers
 .github/         CI: build, mod submissions, registry signing and index publishing
@@ -144,7 +128,7 @@ keys/            Public keys of the registry, authors and reviewers
 | `build.yml` | every push / PR | tests, reproducible jars, launcher download as artifact |
 | `validate-registry.yml` | PRs touching the registry | TOML check, `bcz lint` and `bcz submitter-check` (changes belong to the PR's author), with tools from the base branch |
 | `submission.yml` | PRs adding a release | builds the mod twice on different runners, compares hashes, scans the jar |
-| `registry.yml` | merges to main, daily | rebuilds new releases, signs build records, publishes the signed index |
+| `registry.yml` | merges to main, monthly | rebuilds new releases, signs build records, publishes the signed index (`timestamp.yml` confirms it daily) |
 | `site.yml` | registry changes, after `registry.yml` | registry website on GitHub Pages |
 | `release.yml` | tags `v*`, by hand | installers (msi, dmg, deb, rpm), portable zip and bcz; a tag publishes them as a GitHub release |
 | `gradle-plugin.yml` | changes to `gradle-plugin/`, tags `plugin-v*` | builds and tests the Gradle plugin; a tag publishes it to the Plugin Portal |

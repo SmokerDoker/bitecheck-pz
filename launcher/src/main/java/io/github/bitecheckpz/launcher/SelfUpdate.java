@@ -36,8 +36,9 @@ import java.util.Optional;
  * <ul>
  *   <li>Windows: {@code msiexec /quiet} (per-user install, no admin prompt) once BiteCheck has exited.</li>
  *   <li>macOS: the app bundle is replaced from the DMG once BiteCheck has exited.</li>
- *   <li>Linux: packages need root, so BiteCheck only downloads and checks the package and shows the
- *       command to install it.</li>
+ *   <li>Linux: packages need root: on a desktop with polkit, pkexec asks for the administrator
+ *       password and a root script installs a checked copy of the package; otherwise BiteCheck shows
+ *       the command to install it.</li>
  * </ul>
  */
 public final class SelfUpdate {
@@ -250,12 +251,54 @@ public final class SelfUpdate {
             }
             default -> {
                 boolean rpm = installer.toString().endsWith(".rpm");
+                Optional<Path> pkexec = linuxPkexec();
+                if (pkexec.isPresent()) {
+                    // The system asks for the administrator password (polkit). The script runs as root,
+                    // given inline (no file anyone could change): it waits for BiteCheck to exit, copies
+                    // the package into a new folder only root can write, checks the signed SHA-256 there
+                    // and only then installs that copy.
+                    String sha = signedHash(installer, IndexClient.releaseKey(Config.empty())
+                            .orElseThrow(() -> new IOException("No release key is built in.")));
+                    String script = String.join("\n",
+                            "while kill -0 \"$1\" 2>/dev/null; do sleep 0.3; done",
+                            "d=$(mktemp -d /tmp/bitecheck-update.XXXXXX) || exit 1",
+                            "case \"$2\" in *.rpm) p=\"$d/BiteCheck.rpm\" ;; *) p=\"$d/BiteCheck.deb\" ;; esac",
+                            "cp -- \"$2\" \"$p\" || { rm -rf \"$d\"; exit 1; }",
+                            "echo \"$3  $p\" | sha256sum -c --quiet || { rm -rf \"$d\"; exit 1; }",
+                            "if [ \"$4\" = 1 ]; then",
+                            "  if command -v dnf >/dev/null; then dnf -y reinstall \"$p\" || dnf -y install \"$p\"; else rpm -U --replacepkgs \"$p\"; fi",
+                            "else",
+                            "  apt-get install -y --reinstall \"$p\" || dpkg -i \"$p\"",
+                            "fi",
+                            "rm -rf \"$d\"",
+                            "exit 0");
+                    // a reinstall of the same version repairs, a newer one updates (never restarted as root)
+                    new ProcessBuilder(pkexec.get().toString(), "/bin/sh", "-c", script, "bitecheck-update", pid,
+                            installer.toString(), sha, rpm ? "1" : "0").inheritIO().start();
+                    return new Result(true, "");
+                }
                 String tool = repair ? (rpm ? "sudo dnf reinstall" : "sudo apt install --reinstall")
                         : rpm ? "sudo dnf install" : "sudo apt install";
                 return new Result(false, "BiteCheck " + offer.version() + " was downloaded and its signature checked:\n"
                         + installer + "\n\nInstall it in a terminal with:\n" + tool + " '" + installer + "'");
             }
         }
+    }
+
+    /**
+     * pkexec, if this Linux desktop can ask for the administrator password graphically (polkit and a
+     * display); empty otherwise (a server, a terminal): then the player installs with sudo.
+     */
+    static Optional<Path> linuxPkexec() {
+        if (System.getenv("DISPLAY") == null && System.getenv("WAYLAND_DISPLAY") == null) {
+            return Optional.empty();
+        }
+        for (String p : List.of("/usr/bin/pkexec", "/bin/pkexec")) {
+            if (Files.isExecutable(Path.of(p))) {
+                return Optional.of(Path.of(p));
+            }
+        }
+        return Optional.empty();
     }
 
     /**
