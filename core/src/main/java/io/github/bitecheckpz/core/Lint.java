@@ -360,8 +360,8 @@ public final class Lint {
         boolean workshop = "workshop".equals(type);
         Map<String, Object> compat = Toml.table(doc, "compat");
         for (String field : compat.keySet()) {
-            if (!Compat.FIELDS.containsKey(field)) {
-                error(f, "[compat] knows only game and zombiebuddy, not " + field);
+            if (!Compat.RELEASE_FIELDS.contains(field)) {
+                error(f, "[compat] knows only project_zomboid and zombiebuddy, not " + field);
             } else if (!Compat.isValid(Toml.string(compat, field))) {
                 error(f, "[compat] " + field + " must be a range like \">=42.13, <43\"");
             }

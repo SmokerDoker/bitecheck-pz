@@ -278,7 +278,7 @@ public final class SelfTest {
         run("compat: a release's [compat] goes into the index for its verified jars", () -> {
             Fixture f = Fixture.create();
             // the author signs the release with [compat]; the build record names the release's hash
-            Files.writeString(f.releaseFile, Files.readString(f.releaseFile) + "\n[compat]\ngame = \">=42.13, <43\"\nzombiebuddy = \">=2.3\"\n");
+            Files.writeString(f.releaseFile, Files.readString(f.releaseFile) + "\n[compat]\nproject_zomboid = \">=42.13, <43\"\nzombiebuddy = \">=2.3\"\n");
             Files.deleteIfExists(Signatures.signaturePath(f.releaseFile));
             Signatures.sign(f.releaseFile, f.author);
             Files.writeString(f.buildFile, Files.readString(f.buildFile).replaceAll("(?m)^release_sha256 = .*$",
