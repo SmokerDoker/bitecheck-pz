@@ -91,11 +91,21 @@ public final class CliSelfTest {
             });
             run("submitter-check: changes must belong to the pull request's author", () -> {
                 String base = git(w.repo, "rev-parse", "HEAD");
-                Files.writeString(w.repo.resolve("registry/mods/m/flags/extra.toml"), "x");
+                Files.writeString(w.repo.resolve("registry/mods/m/flags/extra.toml"), "mod = \"m\"\nversion = \"1.0\"\n"
+                        + "severity = \"info\"\nstatus = \"open\"\ndescription = \"x\"\n");
                 Files.writeString(w.repo.resolve("registry/mods/m/releases/1.1.toml"), "changed\n",
                         java.nio.file.StandardOpenOption.APPEND);
                 commit(w, "pr");
                 expect(bcz(w, "submitter-check", "--login", "PubGH", "--base", base), Main.OK);
+                // a new flag that is already "confirmed" (or "abuse"), or names someone else as reporter
+                Files.writeString(w.repo.resolve("registry/mods/m/flags/forged.toml"), "mod = \"m\"\nversion = \"1.0\"\n"
+                        + "severity = \"critical\"\nstatus = \"confirmed\"\ndescription = \"x\"\nreported_by = \"pub\"\n");
+                commit(w, "forged flag");
+                expect(bcz(w, "submitter-check", "--login", "mallory", "--base", base), Main.ERROR);
+                expect(lastOutput.contains("flags/forged.toml: a new flag with status 'confirmed'"), true);
+                expect(lastOutput.contains("flags/forged.toml: belongs to 'pub'"), true);
+                Files.delete(w.repo.resolve("registry/mods/m/flags/forged.toml"));
+                commit(w, "no forged flag");
                 expect(bcz(w, "submitter-check", "--login", "mallory", "--base", base), Main.ERROR);
                 expect(lastOutput.contains("belongs to 'pub' (GitHub PubGH), not to mallory"), true);
                 // Not the author's business: reviewer levels, removing a flag, moving someone's review.
